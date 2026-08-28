@@ -7,6 +7,9 @@ const app = express();
 app.use(express.json());
 
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
+const fetch = global.fetch || require('node-fetch');
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
 function parseLogLines(limit) {
   if (!fs.existsSync('readings.log')) return [];
@@ -36,11 +39,42 @@ app.post('/api/readings', async (req, res) => {
     };
 
     if (pool) {
-      await pool.query(
-        'INSERT INTO readings(device_id, voltage, current, power_watts, recorded_at) VALUES($1,$2,$3,$4,$5)',
-        [row.device_id, row.voltage, row.current, row.power_watts, row.recorded_at]
-      );
-      return res.json({ ok: true, stored: 'postgres' });
+      try {
+        await pool.query(
+          'INSERT INTO readings(device_id, voltage, current, power_watts, recorded_at) VALUES($1,$2,$3,$4,$5)',
+          [row.device_id, row.voltage, row.current, row.power_watts, row.recorded_at]
+        );
+        return res.json({ ok: true, stored: 'postgres' });
+      } catch (dbErr) {
+        console.error('Postgres insert failed, will attempt REST fallback:', dbErr.message || dbErr);
+        // fall through to REST fallback
+      }
+    }
+
+    // REST fallback to Supabase if URL/key provided
+    if (SUPABASE_URL && SUPABASE_KEY) {
+      try {
+        const url = `${SUPABASE_URL.replace(/\/+$/,'')}/rest/v1/readings`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(row)
+        });
+        if (!resp.ok) {
+          const txt = await resp.text();
+          console.error('Supabase REST insert failed:', resp.status, txt);
+        } else {
+          const data = await resp.json();
+          return res.json({ ok: true, stored: 'supabase-rest', result: data });
+        }
+      } catch (restErr) {
+        console.error('Supabase REST insert error:', restErr.message || restErr);
+      }
     }
 
     // Fallback: append to local log for easy testing

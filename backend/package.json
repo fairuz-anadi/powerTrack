@@ -4,7 +4,8 @@
   "description": "Minimal backend for PowerTrack Phase 1",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "apply-schema": "node apply_schema.js"
   },
   "dependencies": {
     "express": "^4.18.2",

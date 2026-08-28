@@ -1,0 +1,34 @@
+-- PowerTrack Phase 1 SQL schema (PostgreSQL)
+
+CREATE TABLE IF NOT EXISTS readings (
+    id SERIAL PRIMARY KEY,
+    device_id VARCHAR(50) NOT NULL,
+    voltage FLOAT NOT NULL,
+    current FLOAT NOT NULL,
+    power_watts FLOAT NOT NULL,
+    recorded_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS predictions (
+    id SERIAL PRIMARY KEY,
+    prediction_type VARCHAR(30) NOT NULL,
+    predicted_value FLOAT NOT NULL,
+    predicted_for TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS alerts (
+    id SERIAL PRIMARY KEY,
+    device_id VARCHAR(50) NOT NULL,
+    description TEXT NOT NULL,
+    severity VARCHAR(20),
+    detected_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS devices (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    relay_pin VARCHAR(20),
+    is_essential BOOLEAN DEFAULT TRUE,
+    current_state VARCHAR(10) DEFAULT 'on'
+);

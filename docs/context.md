@@ -10,6 +10,7 @@
 - Frontend: React (Vite) scaffold at D:\powerTrack\frontend; dev server running at http://localhost:5173/ (network host not exposed by default)
 - Wokwi simulation link (user-provided): https://wokwi.com/projects/473531909019164673
 - Notes: Local environment currently does not have PostgreSQL client/service installed (psql not found). Schema application requires a reachable Postgres instance and DATABASE_URL. Frontend installed and running; disk space on D: is sufficient.
-- Recent action: attempted to apply DB schema to the provided Supabase connection, but the host failed DNS resolution (getaddrinfo ENOTFOUND). Please confirm the connection string and that the Supabase project is active and accepts external connections.
+- Recent action: Supabase schema applied manually via the SQL editor (tables created: alerts, devices, readings, predictions). Backend couldn't apply schema from this machine due to network/DNS restrictions, but the DB is now provisioned and ready.
+- To enable the backend to store to Supabase: create backend/.env with DATABASE_URL=<your-Supabase-connection-string> (do NOT commit .env), then restart the backend. Alternatively, I can guide you to run `npm run apply-schema` locally if needed.
 
 Last updated: 2026-08-29T01:48:00+06:00

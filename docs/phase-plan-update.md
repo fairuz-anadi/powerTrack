@@ -10,7 +10,7 @@ Summary:
 - Phase 3: Dashboard scaffold created (React + Vite). Dev server started at http://localhost:5173/ and is fetching from backend endpoints locally.
 
 Next actions (recommended):
-1. Provision PostgreSQL (local or cloud) and set DATABASE_URL in backend/.env; run `npm run apply-schema` to create tables.
+1. Provision PostgreSQL (local or cloud) and set DATABASE_URL in backend/.env; run `npm run apply-schema` to create tables — alternatively, schema can be applied via Supabase SQL editor (already done in this session).
 2. Start frontend: `cd frontend && npm install && npm run dev` and configure dev proxy/CORS to reach backend.
 3. Update ESP32 Wokwi sketch to POST to http://192.168.0.203:3000/api/readings and run simulation for end-to-end testing.
 
@@ -18,4 +18,4 @@ Risks & Notes:
 - No local Postgres detected; will need provisioning or a cloud Postgres instance (e.g., Supabase, Railway).
 - Keep node_modules and logs out of git; .gitignore added.
 
-Last updated: 2026-08-29T01:48:00+06:00
+Last updated: 2026-08-29T02:30:00+06:00

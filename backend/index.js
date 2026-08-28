@@ -103,5 +103,27 @@ app.get('/api/readings/range', async (req, res) => {
 
 app.get('/api/readings/health', (req, res) => res.json({ ok: true }));
 
+const path = require('path');
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`PowerTrack backend listening on ${port}`));
+
+async function ensureSchema() {
+  if (!pool) return;
+  try {
+    const schemaPath = path.join(__dirname, 'db_schema.sql');
+    if (!fs.existsSync(schemaPath)) return;
+    const schema = fs.readFileSync(schemaPath, 'utf8');
+    // Split on semicolons and run statements sequentially to avoid pg multi-statement issues
+    const statements = schema.split(/;\s*\r?\n/).map(s => s.trim()).filter(Boolean);
+    for (const st of statements) {
+      await pool.query(st);
+    }
+    console.log('Database schema applied');
+  } catch (err) {
+    console.error('Failed to apply DB schema:', err.message || err);
+  }
+}
+
+app.listen(port, async () => {
+  console.log(`PowerTrack backend listening on ${port}`);
+  if (pool) await ensureSchema();
+});

@@ -3,6 +3,8 @@ import React, { useEffect, useState } from 'react'
 export default function App() {
   const [latest, setLatest] = useState(null)
   const [list, setList] = useState([])
+  const [pred, setPred] = useState(null)
+  const [recs, setRecs] = useState([])
 
   useEffect(() => {
     fetch('/api/readings/latest')
@@ -12,6 +14,14 @@ export default function App() {
     fetch('/api/readings?limit=50')
       .then(r => r.json())
       .then(setList)
+      .catch(() => {})
+    fetch('/api/predictions/next-day')
+      .then(r => r.json())
+      .then(d => setPred(d))
+      .catch(() => {})
+    fetch('/api/recommendations')
+      .then(r => r.json())
+      .then(d => setRecs(d.recommendations || []))
       .catch(() => {})
   }, [])
 
@@ -25,6 +35,16 @@ export default function App() {
         ) : (
           <p>No recent reading</p>
         )}
+      </section>
+      <section>
+        <h2>Predicted next-day consumption</h2>
+        {pred ? <p>{(pred.predicted_kwh||0).toFixed(2)} kWh</p> : <p>Loading...</p>}
+      </section>
+      <section>
+        <h2>Recommendations</h2>
+        {recs.length ? (
+          <ul>{recs.map((r,i)=>(<li key={i}><strong>{r.level}</strong>: {r.text}</li>))}</ul>
+        ) : <p>No recommendations</p>}
       </section>
       <section>
         <h2>Recent readings</h2>

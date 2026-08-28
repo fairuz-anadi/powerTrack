@@ -137,6 +137,127 @@ app.get('/api/readings/range', async (req, res) => {
 
 app.get('/api/readings/health', (req, res) => res.json({ ok: true }));
 
+// Helper: get recent readings (ascending by recorded_at)
+async function getRecentReadings(limit = 500) {
+  if (pool) {
+    const { rows } = await pool.query('SELECT * FROM readings ORDER BY recorded_at DESC LIMIT $1', [limit]);
+    return rows.reverse();
+  }
+  // fallback to file
+  return parseLogLines(limit).reverse();
+}
+
+async function savePrediction(predType, value, predicted_for) {
+  const row = { prediction_type: predType, predicted_value: value, predicted_for: predicted_for, created_at: new Date().toISOString() };
+  if (pool) {
+    await pool.query('INSERT INTO predictions(prediction_type, predicted_value, predicted_for, created_at) VALUES($1,$2,$3,$4)', [row.prediction_type, row.predicted_value, row.predicted_for, row.created_at]);
+    return;
+  }
+  fs.appendFileSync('predictions.log', JSON.stringify(row) + '\n');
+}
+
+async function saveAlert(device_id, description, severity='low') {
+  const row = { device_id, description, severity, detected_at: new Date().toISOString() };
+  if (pool) {
+    await pool.query('INSERT INTO alerts(device_id, description, severity, detected_at) VALUES($1,$2,$3,$4)', [row.device_id, row.description, row.severity, row.detected_at]);
+    return;
+  }
+  fs.appendFileSync('alerts.log', JSON.stringify(row) + '\n');
+}
+
+function mean(arr) { if (!arr.length) return 0; return arr.reduce((a,b)=>a+b,0)/arr.length }
+function stddev(arr){ if (arr.length<2) return 0; const m=mean(arr); return Math.sqrt(arr.reduce((s,x)=>s+(x-m)*(x-m),0)/(arr.length-1)); }
+
+// Phase 4: simple next-day prediction (heuristic)
+app.get('/api/predictions/next-day', async (req, res) => {
+  try {
+    const readings = await getRecentReadings(500);
+    if (!readings.length) return res.json({ predicted_kwh: 0});
+    const avgPower = mean(readings.map(r=>Number(r.power_watts || 0)));
+    const predicted_kwh = (avgPower * 24) / 1000; // W -> kWh per day
+    await savePrediction('next_day_consumption', predicted_kwh, new Date(Date.now() + 24*3600*1000).toISOString());
+    return res.json({ predicted_kwh });
+  } catch (err) {
+    console.error('GET /api/predictions/next-day error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+// Phase 4: peak hour prediction (hour with highest average)
+app.get('/api/predictions/peak-hours', async (req, res) => {
+  try {
+    const readings = await getRecentReadings(2000);
+    if (!readings.length) return res.json({ peak_hours: [] });
+    const hours = Array.from({length:24}, ()=>[]);
+    readings.forEach(r=>{
+      const h = new Date(r.recorded_at).getHours();
+      hours[h].push(Number(r.power_watts||0));
+    });
+    const avgByHour = hours.map(harr => mean(harr));
+    const maxAvg = Math.max(...avgByHour);
+    const peak_hours = avgByHour.map((v,idx)=> v===maxAvg?idx:null).filter(x=>x!==null);
+    await savePrediction('peak_hours', maxAvg, new Date().toISOString());
+    return res.json({ peak_hours, maxAvg });
+  } catch (err) {
+    console.error('GET /api/predictions/peak-hours error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+// Phase 4: anomaly detection (simple z-score)
+app.post('/api/detect/anomaly', async (req, res) => {
+  try {
+    const payload = req.body && req.body.reading ? req.body.reading : null;
+    const latest = payload || (await getRecentReadings(1))[0];
+    if (!latest) return res.status(400).json({ error: 'no reading provided or available' });
+    const readings = (await getRecentReadings(200)).map(r=>Number(r.power_watts||0));
+    const m = mean(readings); const s = stddev(readings);
+    const val = Number(latest.power_watts||0);
+    const z = s>0 ? Math.abs((val - m)/s) : 0;
+    const isAnomaly = z > 3;
+    if (isAnomaly) await saveAlert(latest.device_id || 'unknown', `Anomalous power reading: ${val}W (z=${z.toFixed(2)})`, 'medium');
+    return res.json({ isAnomaly, z, value: val });
+  } catch (err) {
+    console.error('POST /api/detect/anomaly error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+// Phase 5: bill estimation
+app.get('/api/bill-estimate', async (req, res) => {
+  try {
+    const tariff = Number(req.query.tariff) || 0.12; // default USD per kWh
+    // use next-day prediction as basis
+    const p = await (await fetch('http://localhost:'+(process.env.PORT||3000)+'/api/predictions/next-day')).json();
+    const daily_kwh = Number(p.predicted_kwh||0);
+    const monthly_kwh = daily_kwh * 30;
+    const estimate = monthly_kwh * tariff;
+    return res.json({ monthly_kwh, estimate, tariff });
+  } catch (err) {
+    console.error('GET /api/bill-estimate error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+// Phase 5: recommendations (rule-based)
+app.get('/api/recommendations', async (req, res) => {
+  try {
+    const p = await (await fetch('http://localhost:'+(process.env.PORT||3000)+'/api/predictions/next-day')).json();
+    const a = await (await fetch('http://localhost:'+(process.env.PORT||3000)+'/api/predictions/peak-hours')).json();
+    const recs = [];
+    if ((p.predicted_kwh||0) > 10) recs.push({ level: 'high', text: `High predicted consumption tomorrow: ${ (p.predicted_kwh||0).toFixed(2) } kWh — consider turning off non-essential devices during peak hours.` });
+    if ((a.peak_hours||[]).length) recs.push({ level: 'info', text: `Predicted peak hours: ${ (a.peak_hours||[]).join(', ') }` });
+    // check recent anomalies
+    const anomalyCheck = await (await fetch('http://localhost:'+(process.env.PORT||3000)+'/api/readings/latest')).json();
+    const anomaly = await (await fetch('http://localhost:'+(process.env.PORT||3000)+'/api/detect/anomaly',{ method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({reading: anomalyCheck}) })).json();
+    if (anomaly.isAnomaly) recs.push({ level: 'warning', text: `Anomaly detected: ${anomaly.value}W (z=${anomaly.z.toFixed(2)}) — inspect connected devices.` });
+    return res.json({ recommendations: recs });
+  } catch (err) {
+    console.error('GET /api/recommendations error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
 const path = require('path');
 const port = process.env.PORT || 3000;
 

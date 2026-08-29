@@ -84,7 +84,7 @@ function PowerChart({ data = [], height = 220 }) {
           return (
             <g key={i}>
               <line x1={padLeft} y1={y} x2={w - padRight} y2={y}
-                stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+                stroke="#e2e8f0" strokeWidth="1" strokeDasharray="4 4" />
               <text x={padLeft - 8} y={y + 4} textAnchor="end"
                 fill="#64748b" fontSize="22" fontFamily="Inter, sans-serif">
                 {Math.round(gv)}
@@ -103,7 +103,7 @@ function PowerChart({ data = [], height = 220 }) {
         {/* Dots on last few points */}
         {points.slice(-5).map((p, i) => (
           <circle key={i} cx={p.x} cy={p.y} r="5"
-            fill="#3b82f6" stroke="#0a0e1a" strokeWidth="2" />
+            fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
         ))}
 
         {/* X-axis labels */}

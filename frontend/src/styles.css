@@ -1,44 +1,44 @@
-/* ===== PowerTrack Design System ===== */
+/* ===== PowerTrack Design System (Crisp Light Theme) ===== */
 
 :root {
-  /* Core palette — deep dark with electric accents */
-  --bg-primary: #0a0e1a;
-  --bg-secondary: #111827;
-  --bg-card: #1a1f2e;
-  --bg-card-hover: #1f2537;
-  --bg-elevated: #232a3b;
+  /* Core palette — Slate light theme */
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-elevated: #f8fafc;
 
   /* Glass effect */
-  --glass-bg: rgba(26, 31, 46, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(226, 232, 240, 0.8);
 
   /* Accent colors */
-  --accent-primary: #3b82f6;
-  --accent-primary-glow: rgba(59, 130, 246, 0.25);
-  --accent-green: #10b981;
-  --accent-green-glow: rgba(16, 185, 129, 0.2);
-  --accent-amber: #f59e0b;
-  --accent-amber-glow: rgba(245, 158, 11, 0.2);
-  --accent-red: #ef4444;
-  --accent-red-glow: rgba(239, 68, 68, 0.2);
-  --accent-purple: #8b5cf6;
-  --accent-purple-glow: rgba(139, 92, 246, 0.2);
-  --accent-cyan: #06b6d4;
+  --accent-primary: #2563eb;
+  --accent-primary-glow: rgba(37, 99, 235, 0.12);
+  --accent-green: #059669;
+  --accent-green-glow: rgba(5, 150, 105, 0.12);
+  --accent-amber: #d97706;
+  --accent-amber-glow: rgba(217, 119, 6, 0.12);
+  --accent-red: #dc2626;
+  --accent-red-glow: rgba(220, 38, 38, 0.12);
+  --accent-purple: #7c3aed;
+  --accent-purple-glow: rgba(124, 58, 237, 0.12);
+  --accent-cyan: #0891b2;
 
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-  --gradient-green: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
-  --gradient-card: linear-gradient(145deg, #1a1f2e 0%, #151a28 100%);
+  --gradient-primary: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  --gradient-green: linear-gradient(135deg, #059669 0%, #0891b2 100%);
+  --gradient-card: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
 
   /* Text */
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --text-accent: #3b82f6;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --text-accent: #2563eb;
 
   /* Border */
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-hover: rgba(255, 255, 255, 0.12);
+  --border-subtle: #e2e8f0;
+  --border-hover: #cbd5e1;
 
   /* Radius */
   --radius-sm: 8px;
@@ -47,9 +47,9 @@
   --radius-xl: 20px;
 
   /* Shadows */
-  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);
-  --shadow-glow-blue: 0 0 40px rgba(59, 130, 246, 0.15);
-  --shadow-glow-green: 0 0 40px rgba(16, 185, 129, 0.15);
+  --shadow-card: 0 4px 20px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+  --shadow-glow-blue: 0 4px 20px rgba(37, 99, 235, 0.2);
+  --shadow-glow-green: 0 4px 20px rgba(5, 150, 105, 0.2);
 
   /* Transitions */
   --transition-fast: 0.15s ease;
@@ -82,7 +82,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Animated gradient background */
+/* Ambient gradient background */
 body::before {
   content: '';
   position: fixed;
@@ -91,9 +91,9 @@ body::before {
   right: 0;
   bottom: 0;
   background:
-    radial-gradient(ellipse 80% 50% at 20% 10%, rgba(59, 130, 246, 0.08) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 80% 80%, rgba(139, 92, 246, 0.06) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(16, 185, 129, 0.04) 0%, transparent 60%);
+    radial-gradient(ellipse 80% 50% at 20% 0%, rgba(37, 99, 235, 0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 90%, rgba(124, 58, 237, 0.04) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(5, 150, 105, 0.03) 0%, transparent 60%);
   pointer-events: none;
   z-index: 0;
 }
@@ -106,8 +106,8 @@ body::before {
 /* ===== Scrollbar ===== */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 /* ===== Layout ===== */
 .dashboard-layout {
@@ -129,6 +129,7 @@ body::before {
   left: 0;
   z-index: 50;
   transition: transform var(--transition-normal);
+  box-shadow: 2px 0 12px rgba(15, 23, 42, 0.03);
 }
 
 .sidebar-logo {
@@ -148,6 +149,7 @@ body::before {
   align-items: center;
   justify-content: center;
   font-size: 18px;
+  color: #ffffff;
   box-shadow: var(--shadow-glow-blue);
 }
 
@@ -174,7 +176,7 @@ body::before {
 
 .nav-section-label {
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -196,7 +198,7 @@ body::before {
 }
 
 .nav-item:hover {
-  background: var(--bg-card);
+  background: var(--bg-card-hover);
   color: var(--text-primary);
   border-color: var(--border-subtle);
 }
@@ -204,7 +206,8 @@ body::before {
 .nav-item.active {
   background: var(--accent-primary-glow);
   color: var(--accent-primary);
-  border-color: rgba(59, 130, 246, 0.2);
+  border-color: rgba(37, 99, 235, 0.2);
+  font-weight: 600;
 }
 
 .nav-item .nav-icon {
@@ -232,11 +235,12 @@ body::before {
   font-size: 1.5rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  color: var(--text-primary);
 }
 
 .page-header .subtitle {
   font-size: 0.85rem;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin-top: 2px;
 }
 
@@ -289,13 +293,14 @@ body::before {
 }
 
 .stat-card {
-  background: var(--gradient-card);
+  background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   padding: 20px;
   transition: all var(--transition-normal);
   position: relative;
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
 }
 
 .stat-card::before {
@@ -304,7 +309,7 @@ body::before {
   top: 0;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 3px;
   background: var(--gradient-primary);
   opacity: 0;
   transition: opacity var(--transition-normal);
@@ -329,8 +334,8 @@ body::before {
 
 .stat-card .stat-label {
   font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--text-muted);
+  font-weight: 600;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -356,11 +361,12 @@ body::before {
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
+  color: var(--text-primary);
 }
 
 .stat-card .stat-unit {
   font-size: 0.85rem;
-  font-weight: 400;
+  font-weight: 500;
   color: var(--text-secondary);
   margin-left: 4px;
 }
@@ -381,15 +387,17 @@ body::before {
 
 /* ===== Cards ===== */
 .card {
-  background: var(--gradient-card);
+  background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   padding: 24px;
-  transition: border-color var(--transition-normal);
+  transition: all var(--transition-normal);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
 }
 
 .card:hover {
   border-color: var(--border-hover);
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.06);
 }
 
 .card-header {
@@ -405,6 +413,7 @@ body::before {
   display: flex;
   align-items: center;
   gap: 8px;
+  color: var(--text-primary);
 }
 
 .card-title .title-icon {
@@ -413,7 +422,7 @@ body::before {
 
 .card-subtitle {
   font-size: 0.75rem;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 /* ===== Content Grid ===== */
@@ -458,11 +467,12 @@ body::before {
   text-align: left;
   font-size: 0.7rem;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
 }
 
 .readings-table td {
@@ -507,6 +517,7 @@ body::before {
 .rec-card:hover {
   border-color: var(--border-hover);
   transform: translateX(4px);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
 .rec-icon {
@@ -532,7 +543,7 @@ body::before {
 
 .rec-level {
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 2px;
@@ -550,15 +561,15 @@ body::before {
 .form-label {
   display: block;
   font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--text-muted);
+  font-weight: 600;
+  color: var(--text-secondary);
   margin-bottom: 6px;
 }
 
 .form-input {
   width: 100%;
   padding: 10px 14px;
-  background: var(--bg-primary);
+  background: #ffffff;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
@@ -596,13 +607,13 @@ body::before {
 
 .btn-primary {
   background: var(--gradient-primary);
-  color: #fff;
-  box-shadow: 0 2px 12px var(--accent-primary-glow);
+  color: #ffffff;
+  box-shadow: 0 2px 10px var(--accent-primary-glow);
 }
 
 .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 20px var(--accent-primary-glow);
+  box-shadow: 0 4px 16px var(--accent-primary-glow);
 }
 
 .btn-primary:active {
@@ -610,13 +621,13 @@ body::before {
 }
 
 .btn-secondary {
-  background: var(--bg-elevated);
+  background: #ffffff;
   color: var(--text-secondary);
   border: 1px solid var(--border-subtle);
 }
 
 .btn-secondary:hover {
-  background: var(--bg-card-hover);
+  background: var(--bg-elevated);
   color: var(--text-primary);
   border-color: var(--border-hover);
 }
@@ -639,13 +650,13 @@ body::before {
 .toast.success {
   background: var(--accent-green-glow);
   color: var(--accent-green);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(5, 150, 105, 0.2);
 }
 
 .toast.error {
   background: var(--accent-red-glow);
   color: var(--accent-red);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(220, 38, 38, 0.2);
 }
 
 @keyframes slideIn {
@@ -664,15 +675,15 @@ body::before {
 .empty-state .empty-icon {
   font-size: 2rem;
   margin-bottom: 8px;
-  opacity: 0.5;
+  opacity: 0.6;
 }
 
 /* ===== Loading Shimmer ===== */
 .shimmer {
   background: linear-gradient(90deg,
-    var(--bg-elevated) 25%,
-    var(--bg-card-hover) 50%,
-    var(--bg-elevated) 75%
+    #f1f5f9 25%,
+    #e2e8f0 50%,
+    #f1f5f9 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;

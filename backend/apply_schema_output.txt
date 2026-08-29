@@ -1,0 +1,12 @@
+﻿
+> powertrack-backend@0.1.0 apply-schema
+> node apply_schema.js
+
+Running: -- PowerTrack Phase 1 SQL schema (PostgreSQL)
+node.exe : Failed to apply schema: getaddrinfo ENOTFOUND db.whwvkqdvhigxxvcwkqjc.supabase.co
+At line:1 char:1
++ & "D:\Softwares\Node.js/node.exe" "D:\Softwares\Node.js/node_modules/ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Failed to apply...qjc.supabase.co:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

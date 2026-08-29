@@ -11,6 +11,21 @@ const fetch = global.fetch || require('node-fetch');
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
+// Simple in-memory rate limiter (per-IP, minute window)
+const rateMap = new Map();
+function rateLimiter(req, res, next){
+  const ip = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = rateMap.get(ip) || { count: 0, ts: now };
+  if (now - entry.ts > 60_000) { entry.count = 0; entry.ts = now; }
+  entry.count++;
+  rateMap.set(ip, entry);
+  if (entry.count > 300) return res.status(429).json({ error: 'rate limit exceeded' });
+  next();
+}
+app.use(rateLimiter);
+
+
 function parseLogLines(limit) {
   if (!fs.existsSync('readings.log')) return [];
   const lines = fs.readFileSync('readings.log', 'utf8').trim().split('\n').filter(Boolean);

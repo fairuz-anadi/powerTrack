@@ -1,0 +1,7 @@
+﻿node : ERROR: Invalid URL
+At line:16 char:70
++ ... s.js -Value $script -Encoding UTF8; node check_tables.js 2>&1 | Out-F ...
++                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR: Invalid URL:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

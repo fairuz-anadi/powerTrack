@@ -13,3 +13,4 @@ Testing steps:
 3. If no DATABASE_URL is set, readings will be appended to backend/readings.log for inspection.
 
 Commit notes: changes are confined to backend/ and docs/ to minimize merge conflicts. Next: integrate with ESP32 firmware (update HTTP target) and set up PostgreSQL per db_schema.sql.
+Alignment with Overview and Phased Plan: ✅ All current changes follow the defined roadmap.

@@ -1,0 +1,12 @@
+﻿
+> powertrack-backend@0.1.0 apply-schema
+> node apply_schema.js
+
+Running: -- PowerTrack Phase 1 SQL schema (PostgreSQL)
+node.exe : Failed to apply schema: connect ENETUNREACH 2406:da14:25a:5802::ac36:5432
+At line:1 char:1
++ & "D:\Softwares\Node.js/node.exe" "D:\Softwares\Node.js/node_modules/ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Failed to apply...5802::ac36:5432:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

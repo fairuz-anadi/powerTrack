@@ -1,0 +1,7 @@
+﻿node : ERROR: getaddrinfo ENOTFOUND db.whwvkqdvhigxxvcwkqjc.supabase.co
+At line:23 char:66
++ ... ck_db.js -Value $script -Encoding UTF8; node check_db.js 2>&1 | Out-F ...
++                                             ~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR: getaddri...qjc.supabase.co:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

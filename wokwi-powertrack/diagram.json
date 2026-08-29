@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "author": "PowerTrack",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "wokwi-esp32-devkit-v1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "loadPot",
+      "top": 28,
+      "left": 310,
+      "attrs": {
+        "value": "55"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "relayLed",
+      "top": 178,
+      "left": 324,
+      "attrs": {
+        "color": "green",
+        "label": "Relay ON"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "relayRes",
+      "top": 180,
+      "left": 218,
+      "attrs": {
+        "value": "220"
+      }
+    }
+  ],
+  "connections": [
+    ["esp:3V3", "loadPot:VCC", "red", []],
+    ["esp:GND.1", "loadPot:GND", "black", []],
+    ["loadPot:SIG", "esp:34", "green", []],
+    ["esp:26", "relayRes:1", "green", []],
+    ["relayRes:2", "relayLed:A", "green", []],
+    ["relayLed:C", "esp:GND.2", "black", []],
+    ["esp:TX0", "$serialMonitor:RX", "", []],
+    ["esp:RX0", "$serialMonitor:TX", "", []]
+  ],
+  "serialMonitor": {
+    "display": "terminal",
+    "newline": "lf"
+  }
+}

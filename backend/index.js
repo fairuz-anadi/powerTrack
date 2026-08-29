@@ -1,5 +1,6 @@
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 const { Pool } = require('pg');
 require('dotenv').config();
 
@@ -9,7 +10,17 @@ app.use(express.json());
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
 const fetch = global.fetch || require('node-fetch');
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY;
+const RELAY_API_KEY = process.env.RELAY_API_KEY;
+const DATA_FILES = {
+  readings: path.join(__dirname, 'readings.log'),
+  predictions: path.join(__dirname, 'predictions.log'),
+  alerts: path.join(__dirname, 'alerts.log')
+};
+
+if (pool) {
+  pool.on('error', err => console.error('Postgres pool error:', err.message || err));
+}
 
 // Simple in-memory rate limiter (per-IP, minute window)
 const rateMap = new Map();
@@ -25,28 +36,50 @@ function rateLimiter(req, res, next){
 }
 app.use(rateLimiter);
 
+function finiteNumber(value) {
+  if (value === '' || value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function relayAuthorization(req, res, next) {
+  if (process.env.NODE_ENV === 'production' && !RELAY_API_KEY) {
+    return res.status(503).json({ error: 'Relay control is not configured' });
+  }
+  if (!RELAY_API_KEY) return next();
+
+  const bearerToken = req.get('authorization')?.replace(/^Bearer\s+/i, '');
+  const providedKey = req.get('x-relay-api-key') || bearerToken;
+  if (providedKey !== RELAY_API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized relay control request' });
+  }
+  next();
+}
 
 function parseLogLines(limit) {
-  if (!fs.existsSync('readings.log')) return [];
-  const lines = fs.readFileSync('readings.log', 'utf8').trim().split('\n').filter(Boolean);
+  if (!fs.existsSync(DATA_FILES.readings)) return [];
+  const lines = fs.readFileSync(DATA_FILES.readings, 'utf8').trim().split('\n').filter(Boolean);
   const selected = lines.slice(-limit);
   return selected.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 }
 
 app.post('/api/readings', async (req, res) => {
   try {
-    const { device_id, voltage, current, power_watts } = req.body;
-    if (!device_id || voltage == null || current == null || power_watts == null) {
+    const { device_id, voltage, current, power_watts } = req.body || {};
+    const deviceId = typeof device_id === 'string' ? device_id.trim() : '';
+    if (!deviceId || deviceId.length > 50 || voltage == null || current == null || power_watts == null) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const v = Number(voltage);
-    const c = Number(current);
-    const p = Number(power_watts);
-    if (v < 0 || c < 0 || p < 0) return res.status(422).json({ error: 'Values must be non-negative' });
+    const v = finiteNumber(voltage);
+    const c = finiteNumber(current);
+    const p = finiteNumber(power_watts);
+    if (v == null || c == null || p == null || v < 0 || c < 0 || p < 0) {
+      return res.status(422).json({ error: 'Voltage, current, and power_watts must be finite non-negative numbers' });
+    }
 
     const row = {
-      device_id,
+      device_id: deviceId,
       voltage: v,
       current: c,
       power_watts: p,
@@ -93,7 +126,7 @@ app.post('/api/readings', async (req, res) => {
     }
 
     // Fallback: append to local log for easy testing
-    fs.appendFileSync('readings.log', JSON.stringify(row) + '\n');
+    fs.appendFileSync(DATA_FILES.readings, JSON.stringify(row) + '\n');
     return res.json({ ok: true, stored: 'file' });
   } catch (err) {
     console.error('POST /api/readings error', err);
@@ -104,7 +137,11 @@ app.post('/api/readings', async (req, res) => {
 // GET /api/readings?limit=50
 app.get('/api/readings', async (req, res) => {
   try {
-    const limit = Math.min(1000, parseInt(req.query.limit) || 50);
+    const requestedLimit = req.query.limit == null ? 50 : Number(req.query.limit);
+    if (!Number.isInteger(requestedLimit) || requestedLimit < 1) {
+      return res.status(400).json({ error: 'limit must be a positive integer' });
+    }
+    const limit = Math.min(1000, requestedLimit);
     if (pool) {
       const { rows } = await pool.query('SELECT * FROM readings ORDER BY recorded_at DESC LIMIT $1', [limit]);
       return res.json(rows);
@@ -137,12 +174,24 @@ app.get('/api/readings/range', async (req, res) => {
   try {
     const { start, end } = req.query;
     if (!start || !end) return res.status(400).json({ error: 'start and end query params required' });
+    const startMs = Date.parse(start);
+    const endMs = Date.parse(end);
+    const maxRangeMs = 31 * 24 * 60 * 60 * 1000;
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+      return res.status(400).json({ error: 'start and end must be valid dates, with start before end' });
+    }
+    if (endMs - startMs > maxRangeMs) {
+      return res.status(400).json({ error: 'Requested range cannot exceed 31 days' });
+    }
     if (pool) {
       const { rows } = await pool.query('SELECT * FROM readings WHERE recorded_at BETWEEN $1 AND $2 ORDER BY recorded_at ASC', [start, end]);
       return res.json(rows);
     }
     const all = parseLogLines(1000000);
-    const filtered = all.filter(r => r.recorded_at >= start && r.recorded_at <= end);
+    const filtered = all.filter(r => {
+      const recordedAtMs = Date.parse(r.recorded_at);
+      return Number.isFinite(recordedAtMs) && recordedAtMs >= startMs && recordedAtMs <= endMs;
+    });
     return res.json(filtered);
   } catch (err) {
     console.error('GET /api/readings/range error', err);
@@ -150,7 +199,15 @@ app.get('/api/readings/range', async (req, res) => {
   }
 });
 
-app.get('/api/readings/health', (req, res) => res.json({ ok: true }));
+app.get('/api/readings/health', async (req, res) => {
+  if (!pool) return res.json({ ok: true, storage: 'file' });
+  try {
+    await pool.query('SELECT 1');
+    return res.json({ ok: true, storage: 'postgres' });
+  } catch (err) {
+    return res.status(503).json({ ok: false, storage: 'postgres', error: 'Database unavailable' });
+  }
+});
 
 // Helper: get recent readings (ascending by recorded_at)
 async function getRecentReadings(limit = 500) {
@@ -168,7 +225,7 @@ async function savePrediction(predType, value, predicted_for) {
     await pool.query('INSERT INTO predictions(prediction_type, predicted_value, predicted_for, created_at) VALUES($1,$2,$3,$4)', [row.prediction_type, row.predicted_value, row.predicted_for, row.created_at]);
     return;
   }
-  fs.appendFileSync('predictions.log', JSON.stringify(row) + '\n');
+  fs.appendFileSync(DATA_FILES.predictions, JSON.stringify(row) + '\n');
 }
 
 async function saveAlert(device_id, description, severity='low') {
@@ -177,61 +234,68 @@ async function saveAlert(device_id, description, severity='low') {
     await pool.query('INSERT INTO alerts(device_id, description, severity, detected_at) VALUES($1,$2,$3,$4)', [row.device_id, row.description, row.severity, row.detected_at]);
     return;
   }
-  fs.appendFileSync('alerts.log', JSON.stringify(row) + '\n');
+  fs.appendFileSync(DATA_FILES.alerts, JSON.stringify(row) + '\n');
 }
 
 function mean(arr) { if (!arr.length) return 0; return arr.reduce((a,b)=>a+b,0)/arr.length }
 function stddev(arr){ if (arr.length<2) return 0; const m=mean(arr); return Math.sqrt(arr.reduce((s,x)=>s+(x-m)*(x-m),0)/(arr.length-1)); }
 
-// Phase 4: simple next-day prediction (heuristic)
+async function calculateNextDayPrediction() {
+  const readings = await getRecentReadings(500);
+  if (!readings.length) return { predicted_kwh: 0 };
+  const avgPower = mean(readings.map(r => Number(r.power_watts || 0)));
+  return { predicted_kwh: (avgPower * 24) / 1000 };
+}
+
+async function calculatePeakHours() {
+  const readings = await getRecentReadings(2000);
+  if (!readings.length) return { peak_hours: [] };
+  const hours = Array.from({ length: 24 }, () => []);
+  readings.forEach(r => hours[new Date(r.recorded_at).getHours()].push(Number(r.power_watts || 0)));
+  const avgByHour = hours.map(hourReadings => mean(hourReadings));
+  const maxAvg = Math.max(...avgByHour);
+  return { peak_hours: avgByHour.map((value, hour) => value === maxAvg ? hour : null).filter(hour => hour !== null), maxAvg };
+}
+
+async function analyzeAnomaly(reading) {
+  const latest = reading || (await getRecentReadings(1))[0];
+  if (!latest) return null;
+  const readings = (await getRecentReadings(200)).map(r => Number(r.power_watts || 0));
+  const m = mean(readings);
+  const s = stddev(readings);
+  const value = Number(latest.power_watts || 0);
+  const z = s > 0 ? Math.abs((value - m) / s) : 0;
+  return { isAnomaly: z > 3, z, value, mean: m, stddev: s, device_id: latest.device_id || 'unknown' };
+}
+
+// These read-only endpoints are safe for dashboard polling. Prediction/alert
+// history should be written by a scheduled job or an explicit action instead.
 app.get('/api/predictions/next-day', async (req, res) => {
   try {
-    const readings = await getRecentReadings(500);
-    if (!readings.length) return res.json({ predicted_kwh: 0});
-    const avgPower = mean(readings.map(r=>Number(r.power_watts || 0)));
-    const predicted_kwh = (avgPower * 24) / 1000; // W -> kWh per day
-    await savePrediction('next_day_consumption', predicted_kwh, new Date(Date.now() + 24*3600*1000).toISOString());
-    return res.json({ predicted_kwh });
+    return res.json(await calculateNextDayPrediction());
   } catch (err) {
     console.error('GET /api/predictions/next-day error', err);
     return res.status(500).json({ error: 'internal' });
   }
 });
 
-// Phase 4: peak hour prediction (hour with highest average)
 app.get('/api/predictions/peak-hours', async (req, res) => {
   try {
-    const readings = await getRecentReadings(2000);
-    if (!readings.length) return res.json({ peak_hours: [] });
-    const hours = Array.from({length:24}, ()=>[]);
-    readings.forEach(r=>{
-      const h = new Date(r.recorded_at).getHours();
-      hours[h].push(Number(r.power_watts||0));
-    });
-    const avgByHour = hours.map(harr => mean(harr));
-    const maxAvg = Math.max(...avgByHour);
-    const peak_hours = avgByHour.map((v,idx)=> v===maxAvg?idx:null).filter(x=>x!==null);
-    await savePrediction('peak_hours', maxAvg, new Date().toISOString());
-    return res.json({ peak_hours, maxAvg });
+    return res.json(await calculatePeakHours());
   } catch (err) {
     console.error('GET /api/predictions/peak-hours error', err);
     return res.status(500).json({ error: 'internal' });
   }
 });
 
-// Phase 4: anomaly detection (simple z-score)
 app.post('/api/detect/anomaly', async (req, res) => {
   try {
-    const payload = req.body && req.body.reading ? req.body.reading : null;
-    const latest = payload || (await getRecentReadings(1))[0];
-    if (!latest) return res.status(400).json({ error: 'no reading provided or available' });
-    const readings = (await getRecentReadings(200)).map(r=>Number(r.power_watts||0));
-    const m = mean(readings); const s = stddev(readings);
-    const val = Number(latest.power_watts||0);
-    const z = s>0 ? Math.abs((val - m)/s) : 0;
-    const isAnomaly = z > 3;
-    if (isAnomaly) await saveAlert(latest.device_id || 'unknown', `Anomalous power reading: ${val}W (z=${z.toFixed(2)})`, 'medium');
-    return res.json({ isAnomaly, z, value: val, mean: m, stddev: s });
+    const anomaly = await analyzeAnomaly(req.body?.reading);
+    if (!anomaly) return res.status(400).json({ error: 'no reading provided or available' });
+    if (anomaly.isAnomaly && req.body?.persist_alert === true) {
+      await saveAlert(anomaly.device_id, `Anomalous power reading: ${anomaly.value}W (z=${anomaly.z.toFixed(2)})`, 'medium');
+    }
+    return res.json(anomaly);
   } catch (err) {
     console.error('POST /api/detect/anomaly error', err);
     return res.status(500).json({ error: 'internal' });
@@ -289,9 +353,9 @@ app.get('/api/analytics/zscores', async (req, res) => {
 // Phase 5: bill estimation
 app.get('/api/bill-estimate', async (req, res) => {
   try {
-    const tariff = Number(req.query.tariff) || 0.12; // default USD per kWh
-    // use next-day prediction as basis
-    const p = await (await fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/predictions/next-day')).json();
+    const tariff = req.query.tariff == null ? 0.12 : finiteNumber(req.query.tariff);
+    if (tariff == null || tariff < 0) return res.status(400).json({ error: 'tariff must be a finite non-negative number' });
+    const p = await calculateNextDayPrediction();
     const daily_kwh = Number(p.predicted_kwh||0);
     const monthly_kwh = daily_kwh * 30;
     const estimate = monthly_kwh * tariff;
@@ -305,15 +369,14 @@ app.get('/api/bill-estimate', async (req, res) => {
 // Phase 5: recommendations (rule-based)
 app.get('/api/recommendations', async (req, res) => {
   try {
-    const p = await (await fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/predictions/next-day')).json();
-    const a = await (await fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/predictions/peak-hours')).json();
+    const p = await calculateNextDayPrediction();
+    const a = await calculatePeakHours();
     const recs = [];
     if ((p.predicted_kwh||0) > 10) recs.push({ level: 'high', text: `High predicted consumption tomorrow: ${ (p.predicted_kwh||0).toFixed(2) } kWh — consider turning off non-essential devices during peak hours.` });
     if ((a.peak_hours||[]).length) recs.push({ level: 'info', text: `Predicted peak hours: ${ (a.peak_hours||[]).join(', ') }` });
     // check recent anomalies
-    const anomalyCheck = await (await fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/readings/latest')).json();
-    const anomaly = await (await fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/detect/anomaly',{ method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({reading: anomalyCheck}) })).json();
-    if (anomaly.isAnomaly) recs.push({ level: 'warning', text: `Anomaly detected: ${anomaly.value}W (z=${anomaly.z.toFixed(2)}) — inspect connected devices.` });
+    const anomaly = await analyzeAnomaly();
+    if (anomaly?.isAnomaly) recs.push({ level: 'warning', text: `Anomaly detected: ${anomaly.value}W (z=${anomaly.z.toFixed(2)}) — inspect connected devices.` });
     return res.json({ recommendations: recs });
   } catch (err) {
     console.error('GET /api/recommendations error', err);
@@ -350,7 +413,7 @@ app.get('/api/detect/fault-risk', async (req, res) => {
     const faultRisk = isOvercurrent || isVoltageSag;
     const riskLevel = isOvercurrent ? 'high' : isVoltageSag ? 'medium' : 'low';
     
-    if (faultRisk) {
+    if (faultRisk && req.query.persist_alert === 'true') {
       await saveAlert(latest.device_id || 'esp32-main-01', `Fault Risk Warning: ${power}W at ${voltage}V`, riskLevel);
     }
     return res.json({ faultRisk, riskLevel, power, voltage, timestamp: latest.recorded_at });
@@ -396,7 +459,7 @@ app.get('/api/devices/relay', (req, res) => {
 });
 
 // Dashboard or AI automation changes relay state
-app.post('/api/devices/relay', (req, res) => {
+app.post('/api/devices/relay', relayAuthorization, (req, res) => {
   try {
     const { relay_state, control_mode, triggered_by } = req.body || {};
     if (relay_state && ['ON', 'OFF'].includes(relay_state.toUpperCase())) {
@@ -414,7 +477,6 @@ app.post('/api/devices/relay', (req, res) => {
   }
 });
 
-const path = require('path');
 const port = process.env.PORT || 3000;
 
 async function ensureSchema() {
@@ -434,7 +496,13 @@ async function ensureSchema() {
   }
 }
 
-app.listen(port, '0.0.0.0', async () => {
-  console.log(`PowerTrack backend listening on port ${port} (0.0.0.0)`);
+async function startServer() {
+  // Apply the schema before accepting requests so a newly provisioned database
+  // cannot receive telemetry before the tables and range-query index exist.
   if (pool) await ensureSchema();
-});
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`PowerTrack backend listening on port ${port} (0.0.0.0)`);
+  });
+}
+
+startServer();

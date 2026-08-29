@@ -15,7 +15,8 @@ const RELAY_API_KEY = process.env.RELAY_API_KEY;
 const DATA_FILES = {
   readings: path.join(__dirname, 'readings.log'),
   predictions: path.join(__dirname, 'predictions.log'),
-  alerts: path.join(__dirname, 'alerts.log')
+  alerts: path.join(__dirname, 'alerts.log'),
+  devices: path.join(__dirname, 'devices.log')
 };
 
 if (pool) {
@@ -56,11 +57,15 @@ function relayAuthorization(req, res, next) {
   next();
 }
 
-function parseLogLines(limit) {
-  if (!fs.existsSync(DATA_FILES.readings)) return [];
-  const lines = fs.readFileSync(DATA_FILES.readings, 'utf8').trim().split('\n').filter(Boolean);
+function parseJsonLog(filePath, limit) {
+  if (!fs.existsSync(filePath)) return [];
+  const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean);
   const selected = lines.slice(-limit);
   return selected.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+}
+
+function parseLogLines(limit) {
+  return parseJsonLog(DATA_FILES.readings, limit);
 }
 
 app.post('/api/readings', async (req, res) => {
@@ -444,6 +449,67 @@ app.post('/api/simulate/solar', (req, res) => {
   }
 });
 
+// Phase 7: Device registration used by the dashboard and Wokwi sensor nodes
+app.get('/api/devices', async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '100', 10), 1), 500);
+    if (pool) {
+      const { rows } = await pool.query(
+        'SELECT device_id, label, relay_pin, is_essential, current_state, registered_at FROM devices ORDER BY registered_at DESC NULLS LAST, id DESC LIMIT $1',
+        [limit]
+      );
+      return res.json(rows);
+    }
+    return res.json(parseJsonLog(DATA_FILES.devices, limit).reverse());
+  } catch (err) {
+    console.error('GET /api/devices error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+app.post('/api/devices', async (req, res) => {
+  try {
+    const { device_id, label, relay_pin, is_essential, current_state } = req.body || {};
+    const deviceId = typeof device_id === 'string' ? device_id.trim() : '';
+    if (!deviceId || deviceId.length > 50) {
+      return res.status(400).json({ error: 'device_id is required and must be 50 characters or fewer' });
+    }
+
+    const row = {
+      device_id: deviceId,
+      label: typeof label === 'string' && label.trim() ? label.trim().slice(0, 100) : null,
+      relay_pin: typeof relay_pin === 'string' && relay_pin.trim() ? relay_pin.trim().slice(0, 20) : null,
+      is_essential: typeof is_essential === 'boolean' ? is_essential : true,
+      current_state: typeof current_state === 'string' && current_state.trim()
+        ? current_state.trim().slice(0, 10).toLowerCase()
+        : 'on',
+      registered_at: new Date().toISOString()
+    };
+
+    if (pool) {
+      await pool.query(
+        `INSERT INTO devices(device_id, label, name, relay_pin, is_essential, current_state, registered_at)
+         VALUES($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (device_id) DO UPDATE SET
+           label = EXCLUDED.label,
+           name = EXCLUDED.name,
+           relay_pin = EXCLUDED.relay_pin,
+           is_essential = EXCLUDED.is_essential,
+           current_state = EXCLUDED.current_state,
+           registered_at = EXCLUDED.registered_at`,
+        [row.device_id, row.label, row.label || row.device_id, row.relay_pin, row.is_essential, row.current_state, row.registered_at]
+      );
+      return res.json({ ok: true, stored: 'postgres', device: row });
+    }
+
+    fs.appendFileSync(DATA_FILES.devices, JSON.stringify(row) + '\n');
+    return res.json({ ok: true, stored: 'file', device: row });
+  } catch (err) {
+    console.error('POST /api/devices error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
 // Phase 7: Automation & Smart Relay Command Handling (ESP32 Polling & Manual Override)
 let relayControllerState = {
   device_id: 'esp32-main-01',
@@ -490,6 +556,10 @@ async function ensureSchema() {
     for (const st of statements) {
       await pool.query(st);
     }
+    await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS device_id VARCHAR(50)");
+    await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS label VARCHAR(100)");
+    await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()");
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_device_id ON devices(device_id)");
     console.log('Database schema applied');
   } catch (err) {
     console.error('Failed to apply DB schema:', err.message || err);

@@ -29,8 +29,11 @@ CREATE TABLE IF NOT EXISTS alerts (
 
 CREATE TABLE IF NOT EXISTS devices (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
+    device_id VARCHAR(50) UNIQUE NOT NULL,
+    label VARCHAR(100),
+    name VARCHAR(100),
     relay_pin VARCHAR(20),
     is_essential BOOLEAN DEFAULT TRUE,
-    current_state VARCHAR(10) DEFAULT 'on'
+    current_state VARCHAR(10) DEFAULT 'on',
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

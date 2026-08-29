@@ -273,6 +273,99 @@ app.get('/api/recommendations', async (req, res) => {
   }
 });
 
+// Phase 6.1: Carbon Footprint Tracking
+app.get('/api/carbon-footprint', async (req, res) => {
+  try {
+    const readings = await getRecentReadings(500);
+    const avgPower = mean(readings.map(r => Number(r.power_watts || 0)));
+    const dailyKwh = (avgPower * 24) / 1000;
+    const gridFactor = 0.82; // kg CO2 per kWh
+    const dailyCo2Kg = dailyKwh * gridFactor;
+    const weeklyCo2Kg = dailyCo2Kg * 7;
+    const co2SavedKg = dailyCo2Kg * 0.18; // 18% savings with AI optimization
+    return res.json({ dailyKwh, dailyCo2Kg, weeklyCo2Kg, co2SavedKg, gridFactor });
+  } catch (err) {
+    console.error('GET /api/carbon-footprint error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+// Phase 6.2: Electrical Fault & Fire Risk Framing
+app.get('/api/detect/fault-risk', async (req, res) => {
+  try {
+    const latest = (await getRecentReadings(1))[0];
+    if (!latest) return res.json({ faultRisk: false, riskLevel: 'low', message: 'No readings available' });
+    const power = Number(latest.power_watts || 0);
+    const voltage = Number(latest.voltage || 0);
+    const isOvercurrent = power > 400;
+    const isVoltageSag = voltage < 205 && power > 200;
+    const faultRisk = isOvercurrent || isVoltageSag;
+    const riskLevel = isOvercurrent ? 'high' : isVoltageSag ? 'medium' : 'low';
+    
+    if (faultRisk) {
+      await saveAlert(latest.device_id || 'esp32-main-01', `Fault Risk Warning: ${power}W at ${voltage}V`, riskLevel);
+    }
+    return res.json({ faultRisk, riskLevel, power, voltage, timestamp: latest.recorded_at });
+  } catch (err) {
+    console.error('GET /api/detect/fault-risk error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+// Phase 6.3: Solar & Battery What-If Simulator
+app.post('/api/simulate/solar', (req, res) => {
+  try {
+    const { solar_kw = 3, battery_kwh = 5, tariff = 0.12 } = req.body || {};
+    const solarGenerationKwhDaily = solar_kw * 4.2; // 4.2 peak sun hours
+    const monthlySolarKwh = solarGenerationKwhDaily * 30;
+    const monthlySavingsDollars = monthlySolarKwh * tariff;
+    const co2OffsetMonthlyKg = monthlySolarKwh * 0.82;
+    return res.json({
+      solar_kw,
+      battery_kwh,
+      solarGenerationKwhDaily,
+      monthlySavingsDollars,
+      co2OffsetMonthlyKg
+    });
+  } catch (err) {
+    console.error('POST /api/simulate/solar error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+// Phase 7: Automation & Smart Relay Command Handling (ESP32 Polling & Manual Override)
+let relayControllerState = {
+  device_id: 'esp32-main-01',
+  relay_state: 'ON',       // 'ON' or 'OFF'
+  control_mode: 'AUTO',    // 'AUTO' or 'MANUAL'
+  last_action_by: 'system',
+  last_updated: new Date().toISOString()
+};
+
+// ESP32 queries current relay command state
+app.get('/api/devices/relay', (req, res) => {
+  return res.json(relayControllerState);
+});
+
+// Dashboard or AI automation changes relay state
+app.post('/api/devices/relay', (req, res) => {
+  try {
+    const { relay_state, control_mode, triggered_by } = req.body || {};
+    if (relay_state && ['ON', 'OFF'].includes(relay_state.toUpperCase())) {
+      relayControllerState.relay_state = relay_state.toUpperCase();
+    }
+    if (control_mode && ['AUTO', 'MANUAL'].includes(control_mode.toUpperCase())) {
+      relayControllerState.control_mode = control_mode.toUpperCase();
+    }
+    relayControllerState.last_action_by = triggered_by || 'user';
+    relayControllerState.last_updated = new Date().toISOString();
+    return res.json({ ok: true, state: relayControllerState });
+  } catch (err) {
+    console.error('POST /api/devices/relay error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
 const path = require('path');
 const port = process.env.PORT || 3000;
 

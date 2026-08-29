@@ -686,8 +686,37 @@ function RecommendationsPage({ recs }) {
 function DevicesPage() {
   const [deviceId, setDeviceId] = useState('')
   const [deviceLabel, setDeviceLabel] = useState('')
-  const [relayState, setRelayState] = useState(true)
+  const [relayState, setRelayState] = useState('ON')
+  const [controlMode, setControlMode] = useState('AUTO')
   const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    fetch(`${API}/devices/relay`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.relay_state) setRelayState(d.relay_state)
+        if (d.control_mode) setControlMode(d.control_mode)
+      })
+      .catch(() => {})
+  }, [])
+
+  async function toggleRelay() {
+    const newState = relayState === 'ON' ? 'OFF' : 'ON'
+    try {
+      const r = await fetch(`${API}/devices/relay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ relay_state: newState, control_mode: 'MANUAL', triggered_by: 'user-dashboard' })
+      })
+      const j = await r.json()
+      if (j.ok && j.state) {
+        setRelayState(j.state.relay_state)
+        setControlMode(j.state.control_mode)
+      }
+    } catch {
+      setRelayState(newState)
+    }
+  }
 
   async function registerDevice(e) {
     e.preventDefault()
@@ -718,7 +747,7 @@ function DevicesPage() {
               <span className="panel-icon">🔌</span>
               <div>
                 <h3 className="panel-title">Connected Smart Grid Inventory</h3>
-                <div className="panel-subtitle">IoT Nodes, PZEM sensors, and automated relay modules</div>
+                <div className="panel-subtitle">IoT Nodes, PZEM sensors, and automated relay modules (Phase 7)</div>
               </div>
             </div>
           </div>
@@ -731,6 +760,7 @@ function DevicesPage() {
                   <th>Type</th>
                   <th>Location / Label</th>
                   <th>Relay Control</th>
+                  <th>Mode</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -740,11 +770,14 @@ function DevicesPage() {
                   <td>ESP32 + PZEM-004T</td>
                   <td>Main Electrical Panel</td>
                   <td>
-                    <button className={`btn btn-sm ${relayState ? 'btn-danger' : 'btn-success'}`} onClick={() => setRelayState(!relayState)}>
-                      {relayState ? 'Cut Power (Relay OFF)' : 'Restore Power (Relay ON)'}
+                    <button className={`btn btn-sm ${relayState === 'ON' ? 'btn-danger' : 'btn-success'}`} onClick={toggleRelay}>
+                      {relayState === 'ON' ? 'Cut Power (Relay OFF)' : 'Restore Power (Relay ON)'}
                     </button>
                   </td>
-                  <td><span className="nav-badge green">Active</span></td>
+                  <td>
+                    <span className={`nav-badge ${controlMode === 'AUTO' ? 'blue' : 'amber'}`}>{controlMode}</span>
+                  </td>
+                  <td><span className={`nav-badge ${relayState === 'ON' ? 'green' : 'amber'}`}>{relayState === 'ON' ? 'Connected' : 'Power Cut'}</span></td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: '700', color: 'var(--brand-primary-light)' }}>esp32-hvac-02</td>
@@ -753,6 +786,7 @@ function DevicesPage() {
                   <td>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Auto Peak Cut</span>
                   </td>
+                  <td><span className="nav-badge blue">AUTO</span></td>
                   <td><span className="nav-badge blue">Standby</span></td>
                 </tr>
               </tbody>

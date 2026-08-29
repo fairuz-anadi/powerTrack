@@ -546,7 +546,7 @@ function PredictionsPage({ pred, peakHours, anomaly, bill }) {
               background: anomaly && anomaly.isAnomaly ? 'var(--rose-bg)' : 'var(--emerald-bg)',
               border: `1px solid ${anomaly && anomaly.isAnomaly ? 'var(--rose-border)' : 'var(--emerald-border)'}`,
               display: 'flex',
-              align-items: 'center',
+              alignItems: 'center',
               gap: 20
             }}>
               <div style={{ fontSize: '2.5rem' }}>{anomaly && anomaly.isAnomaly ? '🚨' : '🛡️'}</div>

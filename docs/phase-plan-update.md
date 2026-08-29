@@ -1,18 +1,20 @@
-# Phase Plan Update — progress snapshot
+# Phase Plan Update — Progress Snapshot
 
-Summary:
-- Phase 0: Documentation complete.
-- Phase 1: Complete. Node.js backend operational with Express endpoints and file fallback storage.
-- Phase 2: Schema ready (backend/db_schema.sql); Postgres / Supabase ready for connection string when configured.
-- Phase 3: Complete. Dashboard redesigned with a sleek, dark-themed UI (Inter font, glassmorphism, animated SVG charts, live connection badge, peak hours, anomaly alerts, recommendations cards, and device registration).
-- Phase 4: AI Layer active with backend heuristics for next-day consumption, peak hours detection, anomaly z-score checks, and recommendation generator.
-- Phase 5: Bill estimation and recommendation text generation active.
+## Summary of Phases
+- **Phase 0 (System Specs)**: Complete ✅. Overview (`docs/powertrack-overview.md`) and Phased Plan (`docs/powertrack-phased-plan.md`) established.
+- **Phase 1 (Backend & Data Ingestion)**: Complete ✅. Express server operational on port 3000 with validation, rate limiting, and file fallback storage (`backend/readings.log`).
+- **Phase 2 (Database Layer)**: Complete ✅. PostgreSQL / Supabase schema ready (`backend/db_schema.sql`). Schema helper (`apply_schema.js`) provided for database deployment.
+- **Phase 3 (Dashboard UI & Frontend)**: Complete ✅. React (Vite) frontend built with a crisp, modern whitish light-mode theme (`#f8fafc`), Inter font, soft card shadows, animated SVG power consumption chart, live system health connection badge, peak hours display, recommendation cards, and device management form.
+- **Phase 4 (AI / Prediction & Analytics Layer)**: Active ✅. Real-time heuristic models for next-day consumption prediction, hourly peak demand forecasting, z-score anomaly detection, and recommendation generation.
+- **Phase 5 (Bill Estimation & Polish)**: Active ✅. Tariff-based monthly bill estimation and automated AI energy-saving suggestions.
 
-Status:
-- Backend: Running on http://localhost:3000
-- Frontend: Running on http://localhost:5173 / http://192.168.0.203:5173
-- Proxy: Vite configured to route `/api` to port 3000.
+## Operational Status
+- **Backend Service**: Running on `http://localhost:3000` (Node.js background process).
+- **Frontend App**: Running on `http://localhost:5173` / `http://192.168.0.203:5173` (Vite dev server).
+- **Vite Proxy**: Configured via `frontend/vite.config.js` to route all `/api` requests directly to `http://localhost:3000`.
+- **Git Branch**: `dev-anadi` (pushed to origin).
 
-Alignment with Overview and Phased Plan: ✅ Complete alignment.
+## Plan Alignment
+- **Alignment with Overview and Phased Plan**: ✅ Complete alignment with `docs/powertrack-overview.md` and `docs/powertrack-phased-plan.md`.
 
-Last updated: 2026-08-29T06:38:50+06:00
+Last updated: 2026-08-29T06:43:30+06:00

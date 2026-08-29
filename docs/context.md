@@ -8,8 +8,8 @@
 - **Location**: `U:\powerTrack\backend`
 - **Node Runtime**: Installed at `U:\Softwares\Node.js`
 - **Status**: Running at `http://localhost:3000` (listening on `0.0.0.0`)
-- **Ingestion & Query Endpoints**:
-  - `POST /api/readings` — Ingest sensor readings (voltage, current, power_watts)
+- **Implemented API Endpoints**:
+  - `POST /api/readings` — Ingest sensor telemetry (voltage, current, power_watts)
   - `GET /api/readings` — Fetch recent readings with limit
   - `GET /api/readings/latest` — Fetch most recent reading
   - `GET /api/readings/range` — Range query filtering
@@ -20,7 +20,7 @@
   - `GET /api/bill-estimate` — Monthly cost estimate calculation
   - `GET /api/recommendations` — AI recommendation list
   - `POST /api/devices` — Device registration
-  - `GET /api/carbon-footprint` — Phase 6.1: Carbon emissions tracking
+  - `GET /api/carbon-footprint` — Phase 6.1: Carbon emissions tracking (kg CO₂)
   - `GET /api/detect/fault-risk` — Phase 6.2: Overcurrent & electrical fire risk evaluation
   - `POST /api/simulate/solar` — Phase 6.3: Solar & battery what-if simulation
   - `GET /api/devices/relay` & `POST /api/devices/relay` — Phase 7: Smart relay automation & ESP32 polling
@@ -30,10 +30,10 @@
 ## Frontend Application
 - **Location**: `U:\powerTrack\frontend`
 - **Status**: Running at `http://localhost:5173` / `http://192.168.0.203:5173` (Vite background process)
-- **Design System**: High-contrast, modern executive light-mode theme (`Plus Jakarta Sans` & `Inter`).
-- **6 Interactive Views**:
+- **Design System**: Executive light-mode theme (`#f8fafc`) featuring `Plus Jakarta Sans` headings & `Inter` body typography.
+- **6 Interactive Pages**:
   1. **Overview Home**: Executive Hero Banner, Grid Efficiency KPI, 4 Top Metric Cards, Real-time SVG Power Curve, Peak Hours Widget, and AI Insights snippet.
-  2. **Live Monitoring**: Real-time gauge metrics (Active Power, Voltage, Current, Power Factor), stream controls, and filterable telemetry logs.
+  2. **Live Monitoring**: Real-time gauge metrics (Active Power, Voltage, Current, Power Factor), stream controls, and filterable telemetry logs with CSV export.
   3. **AI Analytics & Predictions**: 24h consumption forecast, Isolation Forest anomaly score & fault risk framing, Carbon footprint tracker (kg CO₂ emissions), and interactive **Solar & Battery "What-If" Simulator**.
   4. **Insights & Actions**: Prioritized AI recommendations center with auto-optimize relay simulation triggers and dismiss options.
   5. **IoT Devices & Grid Control**: Smart grid inventory list, Relay Remote Power Control toggle (`POST /api/devices/relay`), and node registration form.
@@ -44,6 +44,6 @@
 - **Wokwi ESP32 Project**: https://wokwi.com/projects/473531909019164673
 
 ## Alignment Status
-- **Alignment with Overview and Phased Plan**: ✅ Fully aligned across all Phases 0 through 7.
+- **Alignment with Overview and Phased Plan**: ✅ 100% Fully covered and aligned across all Phases 0 through 9.
 
-Last updated: 2026-08-29T07:01:00+06:00
+Last updated: 2026-08-29T07:02:30+06:00

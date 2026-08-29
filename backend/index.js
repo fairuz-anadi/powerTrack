@@ -231,9 +231,57 @@ app.post('/api/detect/anomaly', async (req, res) => {
     const z = s>0 ? Math.abs((val - m)/s) : 0;
     const isAnomaly = z > 3;
     if (isAnomaly) await saveAlert(latest.device_id || 'unknown', `Anomalous power reading: ${val}W (z=${z.toFixed(2)})`, 'medium');
-    return res.json({ isAnomaly, z, value: val });
+    return res.json({ isAnomaly, z, value: val, mean: m, stddev: s });
   } catch (err) {
     console.error('POST /api/detect/anomaly error', err);
+    return res.status(500).json({ error: 'internal' });
+  }
+});
+
+// Phase 4: Full Z-Score Series Telemetry for Graphical Visualization
+app.get('/api/analytics/zscores', async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '50', 10), 10), 500);
+    const threshold = parseFloat(req.query.threshold || '3.0') || 3.0;
+    const rawReadings = await getRecentReadings(limit);
+    if (!rawReadings.length) {
+      return res.json({ mean: 0, stddev: 0, threshold, points: [], anomalyCount: 0, warningCount: 0 });
+    }
+    const powers = rawReadings.map(r => Number(r.power_watts || 0));
+    const m = mean(powers);
+    const s = stddev(powers);
+
+    let anomalyCount = 0;
+    let warningCount = 0;
+    const points = rawReadings.map(r => {
+      const val = Number(r.power_watts || 0);
+      const rawZ = s > 0 ? (val - m) / s : 0;
+      const absZ = Math.abs(rawZ);
+      const isAnomaly = absZ >= threshold;
+      const isWarning = !isAnomaly && absZ >= 2.0;
+      if (isAnomaly) anomalyCount++;
+      if (isWarning) warningCount++;
+      return {
+        recorded_at: r.recorded_at,
+        device_id: r.device_id,
+        power_watts: val,
+        z: parseFloat(rawZ.toFixed(3)),
+        abs_z: parseFloat(absZ.toFixed(3)),
+        isAnomaly,
+        isWarning
+      };
+    });
+
+    return res.json({
+      mean: parseFloat(m.toFixed(2)),
+      stddev: parseFloat(s.toFixed(2)),
+      threshold,
+      anomalyCount,
+      warningCount,
+      points
+    });
+  } catch (err) {
+    console.error('GET /api/analytics/zscores error', err);
     return res.status(500).json({ error: 'internal' });
   }
 });

@@ -109,6 +109,757 @@ function PowerChart({ data = [], height = 260 }) {
   )
 }
 
+function TelemetryDataState({ status = 'loading', height = 220, label = 'graph' }) {
+  const message = status === 'unavailable'
+    ? 'Backend or database is unavailable. Waiting for telemetry...'
+    : status === 'empty'
+      ? 'No telemetry has been received from the database yet.'
+      : 'Loading live telemetry from the backend...'
+
+  return (
+    <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '0.9rem', textAlign: 'center', padding: 20 }}>
+      📡 {message} The {label} will appear automatically when data arrives.
+    </div>
+  )
+}
+
+/* ===== SVG Z-Score Anomaly & Statistical Distribution Chart ===== */
+function ZScoreChart({ data = [], height = 320, initialThreshold = 3.0 }) {
+  const [threshold, setThreshold] = useState(initialThreshold)
+  const [hoveredPoint, setHoveredPoint] = useState(null)
+
+  if (!data.length) {
+    return (
+      <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '0.9rem' }}>
+        🛡️ Gathering telemetry data for Z-Score statistical analysis...
+      </div>
+    )
+  }
+
+  // Calculate sample mean and standard deviation
+  const powers = data.map(d => Number(d.power_watts || 0))
+  const meanVal = powers.reduce((a, b) => a + b, 0) / (powers.length || 1)
+  const variance = powers.length > 1
+    ? powers.reduce((acc, val) => acc + Math.pow(val - meanVal, 2), 0) / (powers.length - 1)
+    : 0
+  const stddevVal = Math.sqrt(variance)
+
+  // Compute Z-scores: Z = (x - mean) / stddev
+  const pointsData = data.map((d, i) => {
+    const val = Number(d.power_watts || 0)
+    const rawZ = stddevVal > 0 ? (val - meanVal) / stddevVal : 0
+    const absZ = Math.abs(rawZ)
+    const isAnomaly = absZ >= threshold
+    const isWarning = !isAnomaly && absZ >= 2.0
+    return {
+      index: i,
+      recorded_at: d.recorded_at,
+      device_id: d.device_id || 'esp-pzem-01',
+      power: val,
+      z: rawZ,
+      absZ,
+      isAnomaly,
+      isWarning
+    }
+  })
+
+  const anomalyCount = pointsData.filter(p => p.isAnomaly).length
+  const warningCount = pointsData.filter(p => p.isWarning).length
+  const latestPoint = pointsData[pointsData.length - 1]
+
+  // Y-axis scaling around 0
+  const maxZ = Math.max(3.8, threshold * 1.2, ...pointsData.map(p => Math.abs(p.z) * 1.15))
+  const yMin = -maxZ
+  const yMax = maxZ
+  const yRange = yMax - yMin || 1
+
+  const w = 1000
+  const h = 360
+  const padTop = 32
+  const padBot = 48
+  const padLeft = 65
+  const padRight = 30
+  const chartW = w - padLeft - padRight
+  const chartH = h - padTop - padBot
+
+  const getY = (zVal) => padTop + chartH - ((zVal - yMin) / yRange) * chartH
+  const getX = (idx) => padLeft + (idx / Math.max(pointsData.length - 1, 1)) * chartW
+
+  const svgPoints = pointsData.map(p => ({
+    ...p,
+    x: getX(p.index),
+    y: getY(p.z)
+  }))
+
+  const linePath = svgPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
+
+  const yZero = getY(0)
+  const yUpperAnomaly = getY(threshold)
+  const yLowerAnomaly = getY(-threshold)
+  const yUpperWarning = getY(2.0)
+  const yLowerWarning = getY(-2.0)
+
+  return (
+    <div className="zscore-chart-container">
+      {/* Control & Stat Badges Header */}
+      <div className="zscore-toolbar">
+        <div className="zscore-stats-strip">
+          <div className={`zscore-stat-chip ${latestPoint.isAnomaly ? 'alert' : latestPoint.isWarning ? 'warning' : 'normal'}`}>
+            <span>Latest Z-Score:</span>
+            <span className="val">{latestPoint.z >= 0 ? `+${latestPoint.z.toFixed(2)}` : latestPoint.z.toFixed(2)}σ</span>
+          </div>
+          <div className="zscore-stat-chip">
+            <span>Mean (μ):</span>
+            <span className="val">{meanVal.toFixed(1)} W</span>
+          </div>
+          <div className="zscore-stat-chip">
+            <span>Std Dev (σ):</span>
+            <span className="val">±{stddevVal.toFixed(1)} W</span>
+          </div>
+          <div className={`zscore-stat-chip ${anomalyCount > 0 ? 'alert' : 'normal'}`}>
+            <span>Outliers (&gt;{threshold}σ):</span>
+            <span className="val">{anomalyCount}</span>
+          </div>
+        </div>
+
+        <div className="zscore-controls-group">
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Threshold:</span>
+          <div className="segmented-control">
+            <button className={`segmented-btn ${threshold === 2.0 ? 'active' : ''}`} onClick={() => setThreshold(2.0)}>
+              2.0σ (95.4%)
+            </button>
+            <button className={`segmented-btn ${threshold === 2.5 ? 'active' : ''}`} onClick={() => setThreshold(2.5)}>
+              2.5σ (98.8%)
+            </button>
+            <button className={`segmented-btn ${threshold === 3.0 ? 'active' : ''}`} onClick={() => setThreshold(3.0)}>
+              3.0σ (99.7%)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Floating Hover Tooltip */}
+      {hoveredPoint && (
+        <div className="zscore-tooltip">
+          <div><strong>⏱ {formatTime(hoveredPoint.recorded_at)}</strong></div>
+          <div>Power: <strong>{hoveredPoint.power} W</strong></div>
+          <div>Z-Score: <strong style={{ color: hoveredPoint.isAnomaly ? '#ef4444' : hoveredPoint.isWarning ? '#f59e0b' : '#3b82f6' }}>
+            {hoveredPoint.z >= 0 ? `+${hoveredPoint.z.toFixed(2)}` : hoveredPoint.z.toFixed(2)}σ
+          </strong></div>
+          <div>Status: <span style={{ fontWeight: 700, color: hoveredPoint.isAnomaly ? '#ef4444' : hoveredPoint.isWarning ? '#d97706' : '#059669' }}>
+            {hoveredPoint.isAnomaly ? '🚨 Critical Anomaly' : hoveredPoint.isWarning ? '⚠️ Warning Deviation' : '✅ Normal'}
+          </span></div>
+        </div>
+      )}
+
+      {/* SVG Visualization */}
+      <div style={{ width: '100%', height, position: 'relative' }}>
+        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
+          <defs>
+            <linearGradient id="zAreaGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.2" />
+              <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
+            </linearGradient>
+            <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            </filter>
+          </defs>
+
+          {/* Anomaly Upper Band (Z > +threshold) */}
+          <rect x={padLeft} y={padTop} width={chartW} height={Math.max(0, yUpperAnomaly - padTop)} fill="rgba(239, 68, 68, 0.09)" />
+          {/* Anomaly Lower Band (Z < -threshold) */}
+          <rect x={padLeft} y={yLowerAnomaly} width={chartW} height={Math.max(0, (padTop + chartH) - yLowerAnomaly)} fill="rgba(239, 68, 68, 0.09)" />
+
+          {/* Warning Bands */}
+          {threshold > 2.0 && (
+            <>
+              <rect x={padLeft} y={yUpperAnomaly} width={chartW} height={Math.max(0, yUpperWarning - yUpperAnomaly)} fill="rgba(245, 158, 11, 0.08)" />
+              <rect x={padLeft} y={yLowerWarning} width={chartW} height={Math.max(0, yLowerAnomaly - yLowerWarning)} fill="rgba(245, 158, 11, 0.08)" />
+            </>
+          )}
+
+          {/* Safe Normal Zone (-2σ to +2σ) */}
+          <rect x={padLeft} y={yUpperWarning} width={chartW} height={Math.max(0, yLowerWarning - yUpperWarning)} fill="rgba(59, 130, 246, 0.03)" />
+
+          {/* Upper Anomaly Threshold Line */}
+          <line x1={padLeft} y1={yUpperAnomaly} x2={w - padRight} y2={yUpperAnomaly} stroke="#ef4444" strokeWidth="1.6" strokeDasharray="5 4" opacity="0.9" />
+          <text x={w - padRight - 6} y={yUpperAnomaly - 6} textAnchor="end" fill="#ef4444" fontSize="13" fontWeight="700" fontFamily="Inter, sans-serif">
+            +{threshold.toFixed(1)}σ Anomaly Threshold ({Math.round(meanVal + threshold * stddevVal)} W)
+          </text>
+
+          {/* Lower Anomaly Threshold Line (if in range) */}
+          {yLowerAnomaly < padTop + chartH && (
+            <>
+              <line x1={padLeft} y1={yLowerAnomaly} x2={w - padRight} y2={yLowerAnomaly} stroke="#ef4444" strokeWidth="1.6" strokeDasharray="5 4" opacity="0.9" />
+              <text x={w - padRight - 6} y={yLowerAnomaly + 14} textAnchor="end" fill="#ef4444" fontSize="13" fontWeight="700" fontFamily="Inter, sans-serif">
+                -{threshold.toFixed(1)}σ Anomaly Threshold ({Math.max(0, Math.round(meanVal - threshold * stddevVal))} W)
+              </text>
+            </>
+          )}
+
+          {/* Warning Level Lines (±2σ) */}
+          {threshold > 2.0 && (
+            <>
+              <line x1={padLeft} y1={yUpperWarning} x2={w - padRight} y2={yUpperWarning} stroke="#f59e0b" strokeWidth="1.2" strokeDasharray="3 3" opacity="0.75" />
+              <line x1={padLeft} y1={yLowerWarning} x2={w - padRight} y2={yLowerWarning} stroke="#f59e0b" strokeWidth="1.2" strokeDasharray="3 3" opacity="0.75" />
+            </>
+          )}
+
+          {/* Mean Baseline Line (Z = 0) */}
+          <line x1={padLeft} y1={yZero} x2={w - padRight} y2={yZero} stroke="#475569" strokeWidth="1.8" strokeDasharray="4 4" />
+          <text x={padLeft + 10} y={yZero - 6} fill="#475569" fontSize="13" fontWeight="700" fontFamily="Inter, sans-serif">
+            μ Baseline (Z = 0σ | {Math.round(meanVal)} W)
+          </text>
+
+          {/* Y-Axis tick labels */}
+          {[-3, -2, -1, 0, 1, 2, 3].map(tickZ => {
+            if (tickZ > maxZ || tickZ < -maxZ) return null
+            const yPos = getY(tickZ)
+            return (
+              <g key={tickZ}>
+                <line x1={padLeft - 5} y1={yPos} x2={padLeft} y2={yPos} stroke="#cbd5e1" strokeWidth="1" />
+                <text x={padLeft - 10} y={yPos + 4} textAnchor="end" fill="#64748b" fontSize="13" fontWeight="600" fontFamily="Inter, sans-serif">
+                  {tickZ > 0 ? `+${tickZ}σ` : tickZ === 0 ? '0σ' : `${tickZ}σ`}
+                </text>
+              </g>
+            )
+          })}
+
+          {/* Z-Score Trend Line */}
+          <path d={linePath} fill="none" stroke="#2563eb" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Data Points */}
+          {svgPoints.map((p, i) => {
+            const isHovered = hoveredPoint && hoveredPoint.index === p.index
+            let fillCol = '#3b82f6'
+            let radius = isHovered ? 7.5 : 4.5
+
+            if (p.isAnomaly) {
+              fillCol = '#ef4444'
+              radius = isHovered ? 9.5 : 7
+            } else if (p.isWarning) {
+              fillCol = '#f59e0b'
+              radius = isHovered ? 8.5 : 5.5
+            }
+
+            return (
+              <g key={i} onMouseEnter={() => setHoveredPoint(p)} onMouseLeave={() => setHoveredPoint(null)} style={{ cursor: 'pointer' }}>
+                {/* Outer pulse ring for anomalies */}
+                {p.isAnomaly && (
+                  <circle cx={p.x} cy={p.y} r="14" fill="none" stroke="#ef4444" strokeWidth="2" opacity="0.6" filter="url(#glow)">
+                    <animate attributeName="r" values="8;18;8" dur="1.8s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.8s" repeatCount="indefinite" />
+                  </circle>
+                )}
+                {/* Node point */}
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={radius}
+                  fill={fillCol}
+                  stroke="#ffffff"
+                  strokeWidth={isHovered ? 3 : 2}
+                  style={{ transition: 'r 0.15s ease' }}
+                />
+              </g>
+            )
+          })}
+
+          {/* X labels */}
+          {pointsData.filter((_, i) => i % Math.max(Math.floor(pointsData.length / 6), 1) === 0).map((p, i) => {
+            const xPos = getX(p.index)
+            return (
+              <text key={i} x={xPos} y={h - 10} textAnchor="middle" fill="#94a3b8" fontSize="13" fontFamily="Inter, sans-serif">
+                {formatTime(p.recorded_at)}
+              </text>
+            )
+          })}
+        </svg>
+      </div>
+
+      {/* Legend */}
+      <div className="zscore-legend">
+        <div className="legend-item">
+          <span className="legend-dot normal"></span>
+          <span>Normal Baseline (&lt; 2.0σ)</span>
+        </div>
+        <div className="legend-item">
+          <span className="legend-dot warning"></span>
+          <span>Warning Deviation (2.0σ – {threshold.toFixed(1)}σ)</span>
+        </div>
+        <div className="legend-item">
+          <span className="legend-dot danger"></span>
+          <span>Critical Anomaly (&gt; {threshold.toFixed(1)}σ Outlier)</span>
+        </div>
+        <div style={{ marginLeft: 'auto', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+          Standardized Z-Score: <code>Z = (P - μ) / σ</code>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ===== Usage Report Helpers ===== */
+function dateKey(ts) {
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function hourOf(ts) {
+  return new Date(ts).getHours()
+}
+
+// Estimates energy (kWh) from a set of {recorded_at, power_watts} samples using
+// trapezoidal integration of power over time. Gaps larger than 2 hours (device
+// offline / no samples) are skipped so they don't get counted as usage.
+function estimateKwh(readings) {
+  if (!readings || readings.length < 2) return 0
+  const sorted = [...readings].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at))
+  let wattHours = 0
+  for (let i = 1; i < sorted.length; i++) {
+    const t0 = new Date(sorted[i - 1].recorded_at).getTime()
+    const t1 = new Date(sorted[i].recorded_at).getTime()
+    const hrs = (t1 - t0) / 3600000
+    if (!(hrs > 0) || hrs > 2) continue
+    const avgW = (Number(sorted[i - 1].power_watts || 0) + Number(sorted[i].power_watts || 0)) / 2
+    wattHours += avgW * hrs
+  }
+  return wattHours / 1000
+}
+
+const USAGE_RANGE_CONFIG = {
+  today: { label: 'Present Day', days: 1, buckets: 'hour' },
+  '7d': { label: 'Previous 7 Days', days: 7, buckets: 'day' },
+  '15d': { label: 'Previous 15 Days', days: 15, buckets: 'day' },
+  '30d': { label: 'Previous 30 Days', days: 30, buckets: 'day' }
+}
+
+/* ===== SVG Electricity Usage Report Chart (Present Day / 7 / 15 / 30 Days) ===== */
+function UsageReportChart({ height = 320 }) {
+  const [range, setRange] = useState('today')
+  const [rawData, setRawData] = useState([])
+  const [dataStatus, setDataStatus] = useState('loading')
+  const [loading, setLoading] = useState(false)
+  const [lastFetched, setLastFetched] = useState(null)
+  const [hoveredBar, setHoveredBar] = useState(null)
+
+  const cfg = USAGE_RANGE_CONFIG[range]
+
+  const loadRange = useCallback(() => {
+    setLoading(true)
+    // Ask the API for the exact reporting window. This prevents high-frequency
+    // telemetry from being truncated in the 15/30-day reports.
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(start.getDate() - (cfg.days - 1))
+    start.setHours(0, 0, 0, 0)
+    fetch(`${API}/readings/range?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
+      .then(async r => {
+        if (!r.ok) throw new Error('Usage report request failed')
+        const data = await r.json()
+        if (!Array.isArray(data)) throw new Error('Invalid usage report response')
+        return data
+      })
+      .then(data => {
+        setRawData(data)
+        setDataStatus(data.length ? 'ready' : 'empty')
+        setLastFetched(new Date())
+      })
+      .catch(() => {
+        setRawData([])
+        setDataStatus('unavailable')
+      })
+      .finally(() => setLoading(false))
+  }, [range])
+
+  useEffect(() => {
+    loadRange()
+    // Real-time tracking: re-pull and re-aggregate on an interval
+    const timer = setInterval(loadRange, 30000)
+    return () => clearInterval(timer)
+  }, [loadRange])
+
+  const now = new Date()
+  const cutoff = new Date(now)
+  cutoff.setDate(cutoff.getDate() - (cfg.days - 1))
+  cutoff.setHours(0, 0, 0, 0)
+  const inRange = rawData.filter(r => new Date(r.recorded_at) >= cutoff)
+
+  let bars = []
+  if (cfg.buckets === 'hour') {
+    const todayKey = dateKey(now)
+    const todays = inRange.filter(r => dateKey(r.recorded_at) === todayKey)
+    for (let h = 0; h < 24; h++) {
+      const hourReadings = todays.filter(r => hourOf(r.recorded_at) === h)
+      bars.push({
+        label: `${String(h).padStart(2, '0')}:00`,
+        kwh: estimateKwh(hourReadings),
+        count: hourReadings.length,
+        isCurrent: h === now.getHours()
+      })
+    }
+  } else {
+    const dayMap = {}
+    inRange.forEach(r => {
+      const key = dateKey(r.recorded_at)
+      if (!dayMap[key]) dayMap[key] = []
+      dayMap[key].push(r)
+    })
+    for (let i = cfg.days - 1; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(d.getDate() - i)
+      const key = dateKey(d)
+      const readings = dayMap[key] || []
+      bars.push({
+        label: d.toLocaleDateString([], { month: 'short', day: 'numeric' }),
+        kwh: estimateKwh(readings),
+        count: readings.length,
+        isCurrent: i === 0
+      })
+    }
+  }
+
+  const totalKwh = bars.reduce((a, b) => a + b.kwh, 0)
+  const avgKwh = bars.length ? totalKwh / bars.length : 0
+  const peakBar = bars.reduce((max, b) => (!max || b.kwh > max.kwh ? b : max), null)
+
+  const w = 1000
+  const h = 380
+  const padTop = 30
+  const padBot = 56
+  const padLeft = 65
+  const padRight = 20
+  const chartW = w - padLeft - padRight
+  const chartH = h - padTop - padBot
+  const maxKwh = Math.max(...bars.map(b => b.kwh), 0.5) * 1.2
+  const barGap = 6
+  const barW = bars.length ? chartW / bars.length - barGap : 0
+  const labelStride = Math.max(Math.ceil(bars.length / (cfg.buckets === 'hour' ? 12 : 10)), 1)
+
+  return (
+    <div className="panel-card">
+      <div className="panel-header">
+        <div className="panel-title-area">
+          <span className="panel-icon">📈</span>
+          <div>
+            <h3 className="panel-title">Electricity Usage Report</h3>
+            <div className="panel-subtitle">Real-time consumption tracking &amp; historical breakdown</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span className={`nav-badge ${loading ? 'amber' : 'green'}`}>{loading ? '● Syncing' : '● Live'}</span>
+          <button className="btn btn-secondary btn-sm" onClick={loadRange}>🔄 Refresh</button>
+        </div>
+      </div>
+
+      <div className="segmented-control" style={{ marginBottom: 20, flexWrap: 'wrap' }}>
+        {Object.entries(USAGE_RANGE_CONFIG).map(([key, c]) => (
+          <button key={key} className={`segmented-btn ${range === key ? 'active' : ''}`} onClick={() => setRange(key)}>
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="usage-stat-grid">
+        <div style={{ padding: 16, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>TOTAL USAGE</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-title)' }}>{formatNum(totalKwh, 2)} kWh</div>
+        </div>
+        <div style={{ padding: 16, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>{cfg.buckets === 'hour' ? 'AVG PER HOUR' : 'AVG PER DAY'}</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-title)' }}>{formatNum(avgKwh, 2)} kWh</div>
+        </div>
+        <div style={{ padding: 16, background: 'var(--amber-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--amber-border)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--amber-main)', fontWeight: 700 }}>PEAK {cfg.buckets === 'hour' ? 'HOUR' : 'DAY'}</div>
+          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--amber-main)' }}>{peakBar ? `${peakBar.label} · ${formatNum(peakBar.kwh, 2)} kWh` : '—'}</div>
+        </div>
+      </div>
+
+      {hoveredBar && (
+        <div className="zscore-tooltip">
+          <div><strong>{hoveredBar.label}</strong></div>
+          <div>Usage: <strong>{formatNum(hoveredBar.kwh, 3)} kWh</strong></div>
+          <div>Samples: <strong>{hoveredBar.count}</strong></div>
+        </div>
+      )}
+
+      <div style={{ width: '100%', height, position: 'relative' }}>
+        {dataStatus !== 'ready' || !bars.some(b => b.count > 0) ? (
+          <TelemetryDataState status={dataStatus === 'ready' ? 'empty' : dataStatus} height={height} label="usage report graph" />
+        ) : (
+          <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
+            <defs>
+              <linearGradient id="usageBarGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#6366f1" />
+                <stop offset="100%" stopColor="#3b82f6" />
+              </linearGradient>
+              <linearGradient id="usageBarGradCurrent" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#10b981" />
+                <stop offset="100%" stopColor="#059669" />
+              </linearGradient>
+            </defs>
+
+            {Array.from({ length: 5 }, (_, i) => (maxKwh * i) / 4).map((gv, i) => {
+              const y = padTop + chartH - (gv / maxKwh) * chartH
+              return (
+                <g key={i}>
+                  <line x1={padLeft} y1={y} x2={w - padRight} y2={y} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="4 4" />
+                  <text x={padLeft - 10} y={y + 5} textAnchor="end" fill="#94a3b8" fontSize="18" fontFamily="Inter, sans-serif" fontWeight="500">
+                    {gv.toFixed(1)}
+                  </text>
+                </g>
+              )
+            })}
+
+            {bars.map((b, i) => {
+              const x = padLeft + i * (barW + barGap)
+              const barH = maxKwh > 0 ? (b.kwh / maxKwh) * chartH : 0
+              const y = padTop + chartH - barH
+              const isHovered = hoveredBar === b
+              return (
+                <g key={i} onMouseEnter={() => setHoveredBar(b)} onMouseLeave={() => setHoveredBar(null)} style={{ cursor: 'pointer' }}>
+                  <rect
+                    x={x}
+                    y={y}
+                    width={Math.max(barW, 1)}
+                    height={Math.max(barH, 1)}
+                    rx="4"
+                    fill={b.isCurrent ? 'url(#usageBarGradCurrent)' : 'url(#usageBarGrad)'}
+                    opacity={isHovered ? 1 : 0.92}
+                    stroke={isHovered ? '#1e293b' : 'none'}
+                    strokeWidth={isHovered ? 1.5 : 0}
+                  />
+                </g>
+              )
+            })}
+
+            {bars.filter((_, i) => i % labelStride === 0).map((b, i) => {
+              const origIdx = bars.indexOf(b)
+              const x = padLeft + origIdx * (barW + barGap) + barW / 2
+              return (
+                <text key={i} x={x} y={h - padBot + 24} textAnchor="middle" fill="#94a3b8" fontSize="16" fontFamily="Inter, sans-serif">
+                  {b.label}
+                </text>
+              )
+            })}
+          </svg>
+        )}
+      </div>
+
+      <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'right' }}>
+        {lastFetched ? `Last synced ${formatTime(lastFetched)}` : ''}
+      </div>
+    </div>
+  )
+}
+
+const DEVICE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899', '#84cc16']
+
+/* ===== SVG Donut/Pie Chart (generic, reusable) ===== */
+function PieChart({ data = [], size = 220, thickness = 34, centerLabel = '', centerSublabel = '' }) {
+  const total = data.reduce((a, d) => a + d.value, 0)
+  const r = (size - thickness) / 2
+  const cx = size / 2
+  const cy = size / 2
+  const circumference = 2 * Math.PI * r
+  let cumulative = 0
+
+  if (!total) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: size, color: '#94a3b8', fontSize: '0.9rem' }}>
+        🥧 No data to visualize yet...
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
+        <g transform={`rotate(-90 ${cx} ${cy})`}>
+          {data.map((d, i) => {
+            const frac = d.value / total
+            const dash = frac * circumference
+            const gap = circumference - dash
+            const segment = (
+              <circle
+                key={i}
+                cx={cx} cy={cy} r={r}
+                fill="none"
+                stroke={d.color}
+                strokeWidth={thickness}
+                strokeDasharray={`${dash} ${gap}`}
+                strokeDashoffset={-cumulative}
+              />
+            )
+            cumulative += dash
+            return segment
+          })}
+        </g>
+        {centerLabel && (
+          <text x={cx} y={cy - 4} textAnchor="middle" fontSize="22" fontWeight="800" fill="var(--text-title)" fontFamily="Inter, sans-serif">
+            {centerLabel}
+          </text>
+        )}
+        {centerSublabel && (
+          <text x={cx} y={cy + 18} textAnchor="middle" fontSize="12" fontWeight="600" fill="#94a3b8" fontFamily="Inter, sans-serif">
+            {centerSublabel}
+          </text>
+        )}
+      </svg>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 160 }}>
+        {data.map((d, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: d.color, display: 'inline-block', flexShrink: 0 }} />
+            <span style={{ color: 'var(--text-title)', fontWeight: 600 }}>{d.label}</span>
+            <span style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>{formatNum((d.value / total) * 100, 1)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ===== Live Sensor Datalog Report (rolling feed + device usage share pie chart) ===== */
+function SensorDatalogReport({ height = 220 }) {
+  const [logData, setLogData] = useState([])
+  const [dataStatus, setDataStatus] = useState('loading')
+  const [lastFetched, setLastFetched] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  const loadLog = useCallback(() => {
+    setLoading(true)
+    fetch(`${API}/readings?limit=150`)
+      .then(async r => {
+        if (!r.ok) throw new Error('Datalog request failed')
+        const data = await r.json()
+        if (!Array.isArray(data)) throw new Error('Invalid datalog response')
+        return data
+      })
+      .then(data => {
+        setLogData(data)
+        setDataStatus(data.length ? 'ready' : 'empty')
+        setLastFetched(new Date())
+      })
+      .catch(() => {
+        setLogData([])
+        setDataStatus('unavailable')
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    loadLog()
+    const timer = setInterval(loadLog, 5000) // near real-time datalog polling
+    return () => clearInterval(timer)
+  }, [loadLog])
+
+  const sorted = [...logData].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at))
+  const latestEntries = [...sorted].reverse().slice(0, 8)
+
+  // Device-wise energy share within the fetched window
+  const byDevice = {}
+  sorted.forEach(r => {
+    const id = r.device_id || 'esp-pzem-01'
+    if (!byDevice[id]) byDevice[id] = []
+    byDevice[id].push(r)
+  })
+  const deviceIds = Object.keys(byDevice)
+  const pieData = deviceIds
+    .map((id, i) => ({
+      label: id,
+      value: estimateKwh(byDevice[id]) || byDevice[id].reduce((a, r) => a + Number(r.power_watts || 0), 0) / 1000,
+      color: DEVICE_COLORS[i % DEVICE_COLORS.length]
+    }))
+    .filter(d => d.value > 0)
+  const totalPieVal = pieData.reduce((a, d) => a + d.value, 0)
+
+  // Rough sampling interval from timestamps
+  let avgIntervalSec = null
+  if (sorted.length > 1) {
+    const diffs = []
+    for (let i = 1; i < sorted.length; i++) {
+      const dt = (new Date(sorted[i].recorded_at) - new Date(sorted[i - 1].recorded_at)) / 1000
+      if (dt > 0 && dt < 3600) diffs.push(dt)
+    }
+    if (diffs.length) avgIntervalSec = diffs.reduce((a, b) => a + b, 0) / diffs.length
+  }
+
+  return (
+    <div className="panel-card">
+      <div className="panel-header">
+        <div className="panel-title-area">
+          <span className="panel-icon">🛰️</span>
+          <div>
+            <h3 className="panel-title">Live Sensor Datalog Report</h3>
+            <div className="panel-subtitle">Rolling raw telemetry feed &amp; device-wise usage share</div>
+          </div>
+        </div>
+        <span className={`nav-badge ${loading ? 'amber' : 'green'}`}>{loading ? '● Syncing' : '● Live'}</span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
+        <div style={{ padding: 16, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>SAMPLES IN WINDOW</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-title)' }}>{sorted.length}</div>
+        </div>
+        <div style={{ padding: 16, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>ACTIVE DEVICES</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-title)' }}>{deviceIds.length}</div>
+        </div>
+        <div style={{ padding: 16, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>AVG LOG INTERVAL</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-title)' }}>{avgIntervalSec ? `${formatNum(avgIntervalSec, 1)}s` : '—'}</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 24, alignItems: 'start' }}>
+        <div className="table-responsive" style={{ maxHeight: height, overflowY: 'auto' }}>
+          <table className="custom-table">
+            <thead>
+              <tr>
+                <th>Recorded At</th>
+                <th>Device ID</th>
+                <th>Voltage</th>
+                <th>Current</th>
+                <th>Power (W)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {latestEntries.length ? (
+                latestEntries.map((r, i) => (
+                  <tr key={i}>
+                    <td>{formatTime(r.recorded_at)}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--brand-primary-light)' }}>{r.device_id || 'esp-01'}</td>
+                    <td>{formatNum(r.voltage, 1)} V</td>
+                    <td>{formatNum(r.current, 2)} A</td>
+                    <td style={{ fontWeight: 700, color: 'var(--text-title)' }}>{formatNum(r.power_watts, 1)} W</td>
+                  </tr>
+                ))
+              ) : (
+                <tr><td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8' }}>No live samples yet</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--brand-primary)', marginBottom: 12 }}>
+            ⚡ Device Usage Share
+          </div>
+          {dataStatus === 'ready' && pieData.length
+            ? <PieChart data={pieData} size={200} thickness={30} centerLabel={formatNum(totalPieVal, 2)} centerSublabel="kWh (window)" />
+            : <TelemetryDataState status={dataStatus} height={200} label="device usage chart" />}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'right' }}>
+        {lastFetched ? `Last synced ${formatTime(lastFetched)}` : ''}
+      </div>
+    </div>
+  )
+}
+
 /* ===== Sidebar Navigation Component ===== */
 function SidebarNav({ page, setPage, isConnected }) {
   return (
@@ -168,10 +919,24 @@ function SidebarNav({ page, setPage, isConnected }) {
 }
 
 /* ===== 1. HOME / OVERVIEW PAGE ===== */
-function HomePage({ latest, list, pred, bill, peakHours, recs, anomaly, isConnected, setPage }) {
+function HomePage({ latest, list, pred, bill, peakHours, recs, anomaly, isConnected, telemetryStatus, setPage }) {
   const currentW = latest ? Number(latest.power_watts || 0) : 0
   const voltage = latest ? Number(latest.voltage || 0) : 0
   const currentA = latest ? Number(latest.current || 0) : 0
+  const devicePower = list.reduce((groups, reading) => {
+    const id = reading.device_id || 'esp-pzem-01'
+    if (!groups[id]) groups[id] = []
+    groups[id].push(Number(reading.power_watts || 0))
+    return groups
+  }, {})
+  const telemetryPieData = Object.entries(devicePower)
+    .map(([id, watts], index) => ({
+      label: id,
+      value: watts.reduce((sum, value) => sum + value, 0) / watts.length,
+      color: DEVICE_COLORS[index % DEVICE_COLORS.length]
+    }))
+    .filter(item => item.value > 0)
+  const totalAverageWatts = telemetryPieData.reduce((sum, item) => sum + item.value, 0)
 
   return (
     <>
@@ -263,6 +1028,9 @@ function HomePage({ latest, list, pred, bill, peakHours, recs, anomaly, isConnec
         </div>
       </div>
 
+      {/* Interactive usage summary stays on the dashboard for quick reporting. */}
+      <UsageReportChart height={320} />
+
       {/* Grid Layout */}
       <div className="section-grid">
         <div className="main-col">
@@ -280,7 +1048,9 @@ function HomePage({ latest, list, pred, bill, peakHours, recs, anomaly, isConnec
                 Full Stream →
               </button>
             </div>
-            <PowerChart data={list.slice(-40)} height={250} />
+            {telemetryStatus === 'ready'
+              ? <PowerChart data={list.slice(-40)} height={250} />
+              : <TelemetryDataState status={telemetryStatus} height={250} label="power-demand graph" />}
           </div>
 
           {/* Recent Readings Table */}
@@ -294,8 +1064,9 @@ function HomePage({ latest, list, pred, bill, peakHours, recs, anomaly, isConnec
                 </div>
               </div>
             </div>
-            <div className="table-responsive">
-              <table className="custom-table">
+            <div className="dashboard-telemetry-grid">
+              <div className="table-responsive">
+                <table className="custom-table">
                 <thead>
                   <tr>
                     <th>Timestamp</th>
@@ -320,7 +1091,15 @@ function HomePage({ latest, list, pred, bill, peakHours, recs, anomaly, isConnec
                     <tr><td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8' }}>No readings available</td></tr>
                   )}
                 </tbody>
-              </table>
+                </table>
+              </div>
+              <div className="telemetry-pie-panel">
+                <div className="telemetry-pie-title">⚡ Live Power Share</div>
+                <div className="telemetry-pie-subtitle">Average load by connected device</div>
+                {telemetryStatus === 'ready' && telemetryPieData.length
+                  ? <PieChart data={telemetryPieData} size={190} thickness={30} centerLabel={formatNum(totalAverageWatts, 0)} centerSublabel="avg watts" />
+                  : <TelemetryDataState status={telemetryStatus} height={190} label="power-share chart" />}
+              </div>
             </div>
           </div>
         </div>
@@ -405,6 +1184,8 @@ function MonitoringPage({ list, latest, isConnected, fetchAll }) {
   const watts = latest ? Number(latest.power_watts || 0) : 0
   const pf = (voltage > 0 && current > 0) ? (watts / (voltage * current)).toFixed(2) : '0.98'
 
+  const [chartMode, setChartMode] = useState('power') // 'power' | 'zscore' | 'combined'
+
   return (
     <div>
       {/* Gauge Cards */}
@@ -427,19 +1208,54 @@ function MonitoringPage({ list, latest, isConnected, fetchAll }) {
         </div>
       </div>
 
-      {/* Main Chart Card */}
+      {/* Main Chart Card with View Switcher */}
       <div className="panel-card">
         <div className="panel-header">
           <div className="panel-title-area">
-            <span className="panel-icon">📈</span>
+            <span className="panel-icon">{chartMode === 'zscore' ? '🛡️' : '📈'}</span>
             <div>
-              <h3 className="panel-title">High-Frequency Telemetry Stream</h3>
-              <div className="panel-subtitle">Real-time load graph updated every 10 seconds</div>
+              <h3 className="panel-title">
+                {chartMode === 'power' && 'Real-Time Power Demand Curve (W)'}
+                {chartMode === 'zscore' && 'Z-Score Statistical Anomaly Graph (σ)'}
+                {chartMode === 'combined' && 'Dual Telemetry: Power Load & Z-Score Anomaly Stream'}
+              </h3>
+              <div className="panel-subtitle">Streaming live telemetry from connected IoT smart sensors</div>
             </div>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={fetchAll}>🔄 Refresh Stream</button>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div className="chart-tab-switcher">
+              <button className={`chart-tab-btn ${chartMode === 'power' ? 'active' : ''}`} onClick={() => setChartMode('power')}>
+                ⚡ Power (W)
+              </button>
+              <button className={`chart-tab-btn ${chartMode === 'zscore' ? 'active' : ''}`} onClick={() => setChartMode('zscore')}>
+                🛡️ Z-Score (σ)
+              </button>
+              <button className={`chart-tab-btn ${chartMode === 'combined' ? 'active' : ''}`} onClick={() => setChartMode('combined')}>
+                📊 Dual View
+              </button>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={fetchAll}>🔄 Refresh</button>
+          </div>
         </div>
-        <PowerChart data={list.slice(-limit)} height={280} />
+
+        {chartMode === 'power' && <PowerChart data={list.slice(-limit)} height={280} />}
+        {chartMode === 'zscore' && <ZScoreChart data={list.slice(-limit)} height={320} initialThreshold={3.0} />}
+        {chartMode === 'combined' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            <div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--brand-primary)', marginBottom: 8 }}>
+                ⚡ Active Power Demand (Watts)
+              </div>
+              <PowerChart data={list.slice(-limit)} height={220} />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--brand-primary)', marginBottom: 8 }}>
+                🛡️ Standardized Z-Score Anomaly Curve (Sigma σ)
+              </div>
+              <ZScoreChart data={list.slice(-limit)} height={280} initialThreshold={3.0} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Data Table Panel */}
@@ -497,7 +1313,7 @@ function MonitoringPage({ list, latest, isConnected, fetchAll }) {
 }
 
 /* ===== 3. AI PREDICTIONS & ANALYTICS PAGE ===== */
-function PredictionsPage({ pred, peakHours, anomaly, bill }) {
+function PredictionsPage({ pred, peakHours, anomaly, bill, list = [] }) {
   const [solarCapacity, setSolarCapacity] = useState(3) // kW
   const [batterySize, setBatterySize] = useState(5) // kWh
 
@@ -506,58 +1322,92 @@ function PredictionsPage({ pred, peakHours, anomaly, bill }) {
   const netKwh = Math.max(0, dailyKwh - solarGenKwh)
   const monthlySavings = (solarGenKwh * 30 * 0.12).toFixed(2)
 
+  // Compute live Z-score metrics
+  const powers = list.map(d => Number(d.power_watts || 0))
+  const meanVal = powers.length ? powers.reduce((a, b) => a + b, 0) / powers.length : 0
+  const variance = powers.length > 1
+    ? powers.reduce((acc, val) => acc + Math.pow(val - meanVal, 2), 0) / (powers.length - 1)
+    : 0
+  const stddevVal = Math.sqrt(variance)
+  const latestPower = powers.length ? powers[powers.length - 1] : 0
+  const latestZ = stddevVal > 0 ? (latestPower - meanVal) / stddevVal : 0
+
   return (
     <div>
       <div className="kpi-grid">
         <div className="kpi-card">
           <div className="kpi-header"><span className="kpi-title">24h Forecast Consumption</span><div className="kpi-icon-badge indigo">🧠</div></div>
           <div className="kpi-value">{formatNum(dailyKwh, 2)} <span className="kpi-unit">kWh</span></div>
+          <div className="kpi-footer"><span className="kpi-trend-pill up">96.4% Acc</span><span>Random Forest</span></div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-header"><span className="kpi-title">Baseline Mean Load (μ)</span><div className="kpi-icon-badge blue">📊</div></div>
+          <div className="kpi-value">{formatNum(meanVal, 1)} <span className="kpi-unit">W</span></div>
+          <div className="kpi-footer"><span className="kpi-trend-pill neutral">σ = ±{formatNum(stddevVal, 1)}W</span><span>Sample N={list.length}</span></div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-header"><span className="kpi-title">Current Z-Score</span><div className="kpi-icon-badge amber">⚡</div></div>
+          <div className="kpi-value">{latestZ >= 0 ? `+${formatNum(latestZ, 2)}` : formatNum(latestZ, 2)} <span className="kpi-unit">σ</span></div>
+          <div className="kpi-footer"><span className={`kpi-trend-pill ${Math.abs(latestZ) >= 3 ? 'down' : 'up'}`}>{Math.abs(latestZ) >= 3 ? 'Anomaly' : 'Within Normal'}</span><span>Gaussian Limit</span></div>
         </div>
         <div className="kpi-card">
           <div className="kpi-header"><span className="kpi-title">CO₂ Footprint (Est.)</span><div className="kpi-icon-badge emerald">🌱</div></div>
           <div className="kpi-value">{(dailyKwh * 0.85).toFixed(1)} <span className="kpi-unit">kg CO₂</span></div>
+          <div className="kpi-footer"><span className="kpi-trend-pill up">Clean Grid</span><span>Green Index</span></div>
         </div>
-        <div className="kpi-card">
-          <div className="kpi-header"><span className="kpi-title">Model Accuracy</span><div className="kpi-icon-badge blue">🎯</div></div>
-          <div className="kpi-value">96.4% <span className="kpi-unit">R²</span></div>
+      </div>
+
+      {/* Main Z-Score Anomaly Chart Panel */}
+      <div className="panel-card" style={{ marginBottom: 24 }}>
+        <div className="panel-header">
+          <div className="panel-title-area">
+            <span className="panel-icon">🛡️</span>
+            <div>
+              <h3 className="panel-title">Z-Score Statistical Anomaly & Outlier Detection</h3>
+              <div className="panel-subtitle">Real-time standard deviation metric mapping: detects high-draw surges & safety hazards</div>
+            </div>
+          </div>
         </div>
-        <div className="kpi-card">
-          <div className="kpi-header"><span className="kpi-title">Anomaly Risk Score</span><div className="kpi-icon-badge amber">⚡</div></div>
-          <div className="kpi-value">{anomaly ? formatNum(anomaly.z, 2) : '0.12'} <span className="kpi-unit">Z</span></div>
-        </div>
+        <ZScoreChart data={list} height={320} initialThreshold={3.0} />
       </div>
 
       <div className="section-grid">
         <div className="main-col">
-          {/* Anomaly Analyzer */}
+          {/* Anomaly Risk Status Banner */}
           <div className="panel-card">
             <div className="panel-header">
               <div className="panel-title-area">
-                <span className="panel-icon">🛡️</span>
+                <span className="panel-icon">⚙️</span>
                 <div>
-                  <h3 className="panel-title">Isolation Forest Anomaly Analyzer</h3>
-                  <div className="panel-subtitle">Detects unusual current spikes & electrical fault risks</div>
+                  <h3 className="panel-title">Statistical Assessment Summary</h3>
+                  <div className="panel-subtitle">Gaussian distribution Z-test results on latest telemetry stream</div>
                 </div>
               </div>
             </div>
             <div style={{
-              padding: 24,
+              padding: 22,
               borderRadius: 'var(--radius-md)',
-              background: anomaly && anomaly.isAnomaly ? 'var(--rose-bg)' : 'var(--emerald-bg)',
-              border: `1px solid ${anomaly && anomaly.isAnomaly ? 'var(--rose-border)' : 'var(--emerald-border)'}`,
+              background: Math.abs(latestZ) >= 3 ? 'var(--rose-bg)' : Math.abs(latestZ) >= 2 ? 'var(--amber-bg)' : 'var(--emerald-bg)',
+              border: `1px solid ${Math.abs(latestZ) >= 3 ? 'var(--rose-border)' : Math.abs(latestZ) >= 2 ? 'var(--amber-border)' : 'var(--emerald-border)'}`,
               display: 'flex',
               alignItems: 'center',
               gap: 20
             }}>
-              <div style={{ fontSize: '2.5rem' }}>{anomaly && anomaly.isAnomaly ? '🚨' : '🛡️'}</div>
+              <div style={{ fontSize: '2.5rem' }}>{Math.abs(latestZ) >= 3 ? '🚨' : Math.abs(latestZ) >= 2 ? '⚠️' : '🛡️'}</div>
               <div>
-                <h4 style={{ color: anomaly && anomaly.isAnomaly ? 'var(--rose-main)' : 'var(--emerald-main)', fontSize: '1.1rem' }}>
-                  {anomaly && anomaly.isAnomaly ? 'Anomalous Power Draw Flagged' : 'Electrical Baseline Normal'}
+                <h4 style={{ color: Math.abs(latestZ) >= 3 ? 'var(--rose-main)' : Math.abs(latestZ) >= 2 ? 'var(--amber-main)' : 'var(--emerald-main)', fontSize: '1.08rem' }}>
+                  {Math.abs(latestZ) >= 3
+                    ? 'Critical Statistical Anomaly Detected'
+                    : Math.abs(latestZ) >= 2
+                    ? 'Elevated Load Deviation (Warning)'
+                    : 'System Operating Within Normal Statistical Baseline'}
                 </h4>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-body)', marginTop: 4 }}>
-                  {anomaly && anomaly.isAnomaly
-                    ? `Reading of ${anomaly.value}W deviates significantly from standard home baseline (Z=${formatNum(anomaly.z, 2)}). Inspect connected loads.`
-                    : `Current power consumption is within safe statistical limits (Z=${anomaly ? formatNum(anomaly.z, 2) : '0.00'}). No electrical fault risk detected.`}
+                  {Math.abs(latestZ) >= 3
+                    ? `Current reading (${latestPower}W) deviates by ${formatNum(Math.abs(latestZ), 2)}σ standard deviations from normal mean (${formatNum(meanVal, 1)}W). This exceeds the 3.0σ threshold (probability < 0.3%). Possible heavy appliance surge or short-circuit risk.`
+                    : Math.abs(latestZ) >= 2
+                    ? `Current load (${latestPower}W) is moderately elevated at Z = ${formatNum(latestZ, 2)}σ. Approaching peak operating capacity.`
+                    : `Active power draw (${latestPower}W) is safely clustered around baseline mean (${formatNum(meanVal, 1)} ± ${formatNum(stddevVal, 1)}W). Z-Score = ${formatNum(latestZ, 2)}σ.`}
                 </p>
               </div>
             </div>
@@ -601,6 +1451,38 @@ function PredictionsPage({ pred, peakHours, anomaly, bill }) {
 
         {/* Sidebar Column */}
         <div className="side-col">
+          {/* Z-Score Reference Card */}
+          <div className="panel-card">
+            <div className="panel-header">
+              <div className="panel-title-area">
+                <span className="panel-icon">📐</span>
+                <div>
+                  <h3 className="panel-title">Z-Score Distribution Model</h3>
+                  <div className="panel-subtitle">Statistical confidence levels</div>
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ padding: '10px 14px', background: 'var(--emerald-bg)', border: '1px solid var(--emerald-border)', borderRadius: 'var(--radius-sm)', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: 700, color: 'var(--emerald-main)', fontSize: '0.82rem' }}>|Z| &lt; 1.0σ (68.2%)</span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Normal Core</span>
+              </div>
+              <div style={{ padding: '10px 14px', background: 'var(--bg-accent-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: 700, color: 'var(--brand-primary)', fontSize: '0.82rem' }}>|Z| &lt; 2.0σ (95.4%)</span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Acceptable Band</span>
+              </div>
+              <div style={{ padding: '10px 14px', background: 'var(--amber-bg)', border: '1px solid var(--amber-border)', borderRadius: 'var(--radius-sm)', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: 700, color: 'var(--amber-main)', fontSize: '0.82rem' }}>2.0σ ≤ |Z| &lt; 3.0σ</span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Warning (4.3%)</span>
+              </div>
+              <div style={{ padding: '10px 14px', background: 'var(--rose-bg)', border: '1px solid var(--rose-border)', borderRadius: 'var(--radius-sm)', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: 700, color: 'var(--rose-main)', fontSize: '0.82rem' }}>|Z| ≥ 3.0σ (&lt; 0.3%)</span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Critical Outlier</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Peak Demand Card */}
           <div className="panel-card">
             <div className="panel-header">
               <div className="panel-title-area">
@@ -615,7 +1497,7 @@ function PredictionsPage({ pred, peakHours, anomaly, bill }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {peakHours.peak_hours.map((h, i) => (
                   <div key={i} style={{ padding: '12px 16px', background: 'var(--amber-bg)', border: '1px solid var(--amber-border)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: '700', color: 'var(--amber-main)' }}>Hour {h}:00 - {h + 1}:00</span>
+                    <span style={{ fontWeight: 700, color: 'var(--amber-main)' }}>Hour {h}:00 - {h + 1}:00</span>
                     <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Avg Load: {formatNum(peakHours.maxAvg, 1)}W</span>
                   </div>
                 ))}
@@ -837,7 +1719,11 @@ function ReportsPage({ bill, pred }) {
   const monthlyEst = (dailyKwh * 30 * tariffRate).toFixed(2)
 
   return (
-    <div style={{ maxWidth: 800 }}>
+    <div style={{ maxWidth: 900 }}>
+      <UsageReportChart height={320} />
+
+      <SensorDatalogReport height={260} />
+
       <div className="panel-card">
         <div className="panel-header">
           <div className="panel-title-area">
@@ -880,6 +1766,7 @@ export default function App() {
   const [recs, setRecs] = useState([])
   const [anomaly, setAnomaly] = useState(null)
   const [isConnected, setIsConnected] = useState(true)
+  const [telemetryStatus, setTelemetryStatus] = useState('loading')
   const [currentTime, setCurrentTime] = useState(new Date())
 
   const fetchAll = useCallback(() => {
@@ -887,8 +1774,20 @@ export default function App() {
       .then(r => { setIsConnected(r.ok); return r.json() })
       .catch(() => setIsConnected(false))
 
-    fetch(`${API}/readings/latest`).then(r => r.json()).then(setLatest).catch(() => {})
-    fetch(`${API}/readings?limit=50`).then(r => r.json()).then(setList).catch(() => {})
+    fetch(`${API}/readings/latest`).then(r => r.json()).then(setLatest).catch(() => setLatest(null))
+    fetch(`${API}/readings?limit=50`)
+      .then(async r => {
+        if (!r.ok) throw new Error('Telemetry request failed')
+        const readings = await r.json()
+        if (!Array.isArray(readings)) throw new Error('Invalid telemetry response')
+        setList(readings)
+        setTelemetryStatus(readings.length ? 'ready' : 'empty')
+      })
+      .catch(() => {
+        setList([])
+        setLatest(null)
+        setTelemetryStatus('unavailable')
+      })
     fetch(`${API}/predictions/next-day`).then(r => r.json()).then(setPred).catch(() => {})
     fetch(`${API}/bill-estimate`).then(r => r.json()).then(setBill).catch(() => {})
     fetch(`${API}/predictions/peak-hours`).then(r => r.json()).then(setPeakHours).catch(() => {})
@@ -910,7 +1809,7 @@ export default function App() {
     predictions: 'AI Analytics & Forecasts',
     recommendations: 'AI Recommendations & Actions',
     devices: 'IoT Node & Relay Management',
-    reports: 'Tariff & Cost Calculator'
+    reports: 'Usage & Cost Reports'
   }
 
   const subtitles = {
@@ -919,7 +1818,7 @@ export default function App() {
     predictions: 'Machine learning prediction models, solar simulation, and safety risk evaluation',
     recommendations: 'Prioritized insights to cut monthly bill and mitigate overload risks',
     devices: 'Control smart relays, register sensors, and configure load thresholds',
-    reports: 'Custom rate simulation and monthly bill estimates'
+    reports: 'Present day, 7/15/30-day usage tracking, custom rate simulation, and bill estimates'
   }
 
   return (
@@ -940,7 +1839,7 @@ export default function App() {
 
         <main className="page-container">
           {page === 'home' && (
-            <HomePage latest={latest} list={list} pred={pred} bill={bill} peakHours={peakHours} recs={recs} anomaly={anomaly} isConnected={isConnected} setPage={setPage} />
+            <HomePage latest={latest} list={list} pred={pred} bill={bill} peakHours={peakHours} recs={recs} anomaly={anomaly} isConnected={isConnected} telemetryStatus={telemetryStatus} setPage={setPage} />
           )}
 
           {page === 'monitoring' && (
@@ -948,7 +1847,7 @@ export default function App() {
           )}
 
           {page === 'predictions' && (
-            <PredictionsPage pred={pred} peakHours={peakHours} anomaly={anomaly} bill={bill} />
+            <PredictionsPage pred={pred} peakHours={peakHours} anomaly={anomaly} bill={bill} list={list} />
           )}
 
           {page === 'recommendations' && (

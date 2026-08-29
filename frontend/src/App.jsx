@@ -459,7 +459,7 @@ function MonitoringPage({ list, latest, isConnected, fetchAll }) {
         </div>
 
         <div className="table-responsive" style={{ maxHeight: 380, overflowY: 'auto' }}>
-          <custom-table className="custom-table">
+          <table className="custom-table">
             <thead>
               <tr>
                 <th>Recorded At</th>
@@ -489,7 +489,7 @@ function MonitoringPage({ list, latest, isConnected, fetchAll }) {
                 <tr><td colSpan={6} style={{ textAlign: 'center', color: '#94a3b8' }}>No matching telemetry records found</td></tr>
               )}
             </tbody>
-          </custom-table>
+          </table>
         </div>
       </div>
     </div>

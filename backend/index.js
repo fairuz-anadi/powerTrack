@@ -243,7 +243,7 @@ app.get('/api/bill-estimate', async (req, res) => {
   try {
     const tariff = Number(req.query.tariff) || 0.12; // default USD per kWh
     // use next-day prediction as basis
-    const p = await (await fetch('http://localhost:'+(process.env.PORT||3000)+'/api/predictions/next-day')).json();
+    const p = await (await fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/predictions/next-day')).json();
     const daily_kwh = Number(p.predicted_kwh||0);
     const monthly_kwh = daily_kwh * 30;
     const estimate = monthly_kwh * tariff;
@@ -257,14 +257,14 @@ app.get('/api/bill-estimate', async (req, res) => {
 // Phase 5: recommendations (rule-based)
 app.get('/api/recommendations', async (req, res) => {
   try {
-    const p = await (await fetch('http://localhost:'+(process.env.PORT||3000)+'/api/predictions/next-day')).json();
-    const a = await (await fetch('http://localhost:'+(process.env.PORT||3000)+'/api/predictions/peak-hours')).json();
+    const p = await (await fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/predictions/next-day')).json();
+    const a = await (await fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/predictions/peak-hours')).json();
     const recs = [];
     if ((p.predicted_kwh||0) > 10) recs.push({ level: 'high', text: `High predicted consumption tomorrow: ${ (p.predicted_kwh||0).toFixed(2) } kWh — consider turning off non-essential devices during peak hours.` });
     if ((a.peak_hours||[]).length) recs.push({ level: 'info', text: `Predicted peak hours: ${ (a.peak_hours||[]).join(', ') }` });
     // check recent anomalies
-    const anomalyCheck = await (await fetch('http://localhost:'+(process.env.PORT||3000)+'/api/readings/latest')).json();
-    const anomaly = await (await fetch('http://localhost:'+(process.env.PORT||3000)+'/api/detect/anomaly',{ method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({reading: anomalyCheck}) })).json();
+    const anomalyCheck = await (await fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/readings/latest')).json();
+    const anomaly = await (await fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/detect/anomaly',{ method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({reading: anomalyCheck}) })).json();
     if (anomaly.isAnomaly) recs.push({ level: 'warning', text: `Anomaly detected: ${anomaly.value}W (z=${anomaly.z.toFixed(2)}) — inspect connected devices.` });
     return res.json({ recommendations: recs });
   } catch (err) {
@@ -293,7 +293,7 @@ async function ensureSchema() {
   }
 }
 
-app.listen(port, async () => {
-  console.log(`PowerTrack backend listening on ${port}`);
+app.listen(port, '0.0.0.0', async () => {
+  console.log(`PowerTrack backend listening on port ${port} (0.0.0.0)`);
   if (pool) await ensureSchema();
 });

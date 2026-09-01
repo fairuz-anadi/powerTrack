@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 
 const API = '/api'
 
@@ -20,8 +20,52 @@ function formatNum(n, decimals = 1) {
   return Number(n).toFixed(decimals)
 }
 
+/* ===== Responsive Container Hook ===== */
+function useContainerWidth(ref, defaultWidth = 800) {
+  const [width, setWidth] = useState(defaultWidth)
+  useEffect(() => {
+    if (!ref.current) return
+    const update = () => {
+      const rect = ref.current.getBoundingClientRect()
+      if (rect.width > 0) setWidth(Math.round(rect.width))
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(ref.current)
+    return () => ro.disconnect()
+  }, [ref, defaultWidth])
+  return width
+}
+
+/* ===== Smooth Catmull-Rom Cubic Spline Path Builder ===== */
+function getSmoothPath(points) {
+  if (!points || points.length === 0) return ''
+  if (points.length === 1) return `M ${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`
+  if (points.length === 2) return `M ${points[0].x.toFixed(1)},${points[0].y.toFixed(1)} L ${points[1].x.toFixed(1)},${points[1].y.toFixed(1)}`
+
+  let d = `M ${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)]
+    const p1 = points[i]
+    const p2 = points[i + 1]
+    const p3 = points[Math.min(points.length - 1, i + 2)]
+
+    const cp1x = p1.x + (p2.x - p0.x) / 6
+    const cp1y = p1.y + (p2.y - p0.y) / 6
+    const cp2x = p2.x - (p3.x - p1.x) / 6
+    const cp2y = p2.y - (p3.y - p1.y) / 6
+
+    d += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`
+  }
+  return d
+}
+
 /* ===== SVG Power Chart Component ===== */
 function PowerChart({ data = [], height = 260 }) {
+  const containerRef = useRef(null)
+  const width = useContainerWidth(containerRef, 800)
+  const [hoverIndex, setHoverIndex] = useState(null)
+
   if (!data.length) {
     return (
       <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '0.9rem' }}>
@@ -31,80 +75,246 @@ function PowerChart({ data = [], height = 260 }) {
   }
 
   const vals = data.map(d => Number(d.power_watts || 0))
-  const maxVal = Math.max(...vals, 1) * 1.15
-  const minVal = Math.min(...vals, 0)
+  const maxRaw = Math.max(...vals, 10)
+  const minRaw = Math.min(...vals, 0)
+  const padVal = (maxRaw - minRaw) * 0.15 || 50
+  const maxVal = Math.ceil((maxRaw + padVal) / 50) * 50
+  const minVal = Math.max(0, Math.floor((minRaw - padVal) / 50) * 50)
   const range = maxVal - minVal || 1
-  const w = 1000
-  const h = 380
-  const padTop = 20
-  const padBot = 40
-  const padLeft = 55
-  const padRight = 20
-  const chartW = w - padLeft - padRight
-  const chartH = h - padTop - padBot
 
-  const points = vals.map((v, i) => {
-    const x = padLeft + (i / Math.max(vals.length - 1, 1)) * chartW
+  const w = width
+  const h = height
+  const padTop = 24
+  const padBot = 36
+  const padLeft = 60
+  const padRight = 24
+  const chartW = Math.max(10, w - padLeft - padRight)
+  const chartH = Math.max(10, h - padTop - padBot)
+
+  const points = data.map((d, i) => {
+    const v = Number(d.power_watts || 0)
+    const x = padLeft + (i / Math.max(data.length - 1, 1)) * chartW
     const y = padTop + chartH - ((v - minVal) / range) * chartH
-    return { x, y, v }
+    return { x, y, v, data: d, index: i }
   })
 
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
-  const areaPath = `${linePath} L${points[points.length - 1].x},${padTop + chartH} L${points[0].x},${padTop + chartH} Z`
+  const smoothLine = getSmoothPath(points)
+  const areaPath = points.length > 1
+    ? `${smoothLine} L ${points[points.length - 1].x.toFixed(1)},${(padTop + chartH).toFixed(1)} L ${points[0].x.toFixed(1)},${(padTop + chartH).toFixed(1)} Z`
+    : ''
 
-  const gridLines = 5
-  const gridVals = Array.from({ length: gridLines }, (_, i) => minVal + (range * i) / (gridLines - 1))
+  const gridCount = 4
+  const gridVals = Array.from({ length: gridCount + 1 }, (_, i) => minVal + (range * i) / gridCount)
+
+  // Metrics summary
+  const latestVal = vals[vals.length - 1]
+  const avgVal = vals.reduce((a, b) => a + b, 0) / (vals.length || 1)
+  const peakVal = Math.max(...vals)
+
+  // Hovered item
+  const activePoint = hoverIndex != null && points[hoverIndex] ? points[hoverIndex] : null
+
+  const handleMouseMove = (e) => {
+    if (!containerRef.current || points.length < 2) return
+    const rect = containerRef.current.getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    if (mouseX < padLeft - 10 || mouseX > w - padRight + 10) {
+      setHoverIndex(null)
+      return
+    }
+    const ratio = Math.max(0, Math.min(1, (mouseX - padLeft) / chartW))
+    const nearestIdx = Math.round(ratio * (points.length - 1))
+    setHoverIndex(nearestIdx)
+  }
+
+  const handleMouseLeave = () => setHoverIndex(null)
+
+  // Smart X-axis label spacing
+  const maxLabels = Math.min(6, Math.max(2, Math.floor(chartW / 110)))
+  const labelStep = Math.max(1, Math.floor((points.length - 1) / (maxLabels - 1)))
+  const labelIndices = []
+  for (let i = 0; i < points.length; i += labelStep) {
+    labelIndices.push(i)
+  }
+  if (labelIndices[labelIndices.length - 1] !== points.length - 1) {
+    labelIndices.push(points.length - 1)
+  }
 
   return (
-    <div style={{ width: '100%', height, position: 'relative' }}>
-      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
+    <div
+      ref={containerRef}
+      className="modern-chart-wrapper"
+      style={{ width: '100%', height, position: 'relative', userSelect: 'none' }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
+      {/* Quick stats overlay */}
+      <div className="chart-stat-overlay">
+        <div className="chart-stat-item">
+          <span className="chart-stat-label">LIVE</span>
+          <span className="chart-stat-value live">{latestVal.toFixed(1)} W</span>
+        </div>
+        <div className="chart-stat-item">
+          <span className="chart-stat-label">AVG</span>
+          <span className="chart-stat-value">{avgVal.toFixed(1)} W</span>
+        </div>
+        <div className="chart-stat-item">
+          <span className="chart-stat-label">PEAK</span>
+          <span className="chart-stat-value peak">{peakVal.toFixed(1)} W</span>
+        </div>
+      </div>
+
+      <svg width={w} height={h} style={{ display: 'block', overflow: 'visible' }}>
         <defs>
-          <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id="powerAreaGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25" />
+            <stop offset="60%" stopColor="#6366f1" stopOpacity="0.06" />
             <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
           </linearGradient>
-          <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#1e40af" />
-            <stop offset="50%" stopColor="#3b82f6" />
-            <stop offset="100%" stopColor="#6366f1" />
+          <linearGradient id="powerLineGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#2563eb" />
+            <stop offset="50%" stopColor="#4f46e5" />
+            <stop offset="100%" stopColor="#7c3aed" />
           </linearGradient>
+          <filter id="nodeGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#3b82f6" floodOpacity="0.6" />
+          </filter>
         </defs>
 
-        {/* Grid lines */}
+        {/* Horizontal Grid lines and Y labels */}
         {gridVals.map((gv, i) => {
           const y = padTop + chartH - ((gv - minVal) / range) * chartH
           return (
             <g key={i}>
-              <line x1={padLeft} y1={y} x2={w - padRight} y2={y} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="4 4" />
-              <text x={padLeft - 10} y={y + 5} textAnchor="end" fill="#94a3b8" fontSize="20" fontFamily="Inter, sans-serif" fontWeight="500">
+              <line
+                x1={padLeft}
+                y1={y}
+                x2={w - padRight}
+                y2={y}
+                stroke="#e2e8f0"
+                strokeWidth="1"
+                strokeDasharray={i === 0 ? 'none' : '3 4'}
+              />
+              <text
+                x={padLeft - 10}
+                y={y + 4}
+                textAnchor="end"
+                fill="#94a3b8"
+                fontSize="11"
+                fontFamily="Inter, system-ui, sans-serif"
+                fontWeight="600"
+              >
                 {Math.round(gv)} W
               </text>
             </g>
           )
         })}
 
-        {/* Area */}
-        <path d={areaPath} fill="url(#chartGrad)" />
+        {/* Area fill */}
+        {areaPath && <path d={areaPath} fill="url(#powerAreaGrad)" />}
 
-        {/* Path line */}
-        <path d={linePath} fill="none" stroke="url(#lineGrad)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+        {/* Smooth spline curve line */}
+        {smoothLine && (
+          <path
+            d={smoothLine}
+            fill="none"
+            stroke="url(#powerLineGrad)"
+            strokeWidth="2.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
 
-        {/* Active Nodes */}
-        {points.slice(-6).map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r="5" fill="#3b82f6" stroke="#ffffff" strokeWidth="2.5" />
-        ))}
-
-        {/* X labels */}
-        {data.filter((_, i) => i % Math.max(Math.floor(data.length / 6), 1) === 0).map((d, i) => {
-          const idx = data.indexOf(d)
-          const x = padLeft + (idx / Math.max(data.length - 1, 1)) * chartW
+        {/* X-axis time labels */}
+        {labelIndices.map((idx) => {
+          const p = points[idx]
+          if (!p) return null
           return (
-            <text key={i} x={x} y={h - 10} textAnchor="middle" fill="#94a3b8" fontSize="18" fontFamily="Inter, sans-serif">
-              {formatTime(d.recorded_at)}
+            <text
+              key={idx}
+              x={p.x}
+              y={h - 12}
+              textAnchor="middle"
+              fill="#94a3b8"
+              fontSize="11"
+              fontFamily="Inter, system-ui, sans-serif"
+              fontWeight="500"
+            >
+              {formatTime(p.data.recorded_at)}
             </text>
           )
         })}
+
+        {/* Active hover crosshair and point */}
+        {activePoint && (
+          <g>
+            <line
+              x1={activePoint.x}
+              y1={padTop}
+              x2={activePoint.x}
+              y2={padTop + chartH}
+              stroke="#64748b"
+              strokeWidth="1.2"
+              strokeDasharray="3 3"
+              opacity="0.8"
+            />
+            <circle
+              cx={activePoint.x}
+              cy={activePoint.y}
+              r="7"
+              fill="#ffffff"
+              stroke="#4f46e5"
+              strokeWidth="3"
+              filter="url(#nodeGlow)"
+            />
+          </g>
+        )}
+
+        {/* Live point pulse at end of curve */}
+        {!activePoint && points.length > 0 && (
+          <g>
+            <circle
+              cx={points[points.length - 1].x}
+              cy={points[points.length - 1].y}
+              r="10"
+              fill="rgba(59, 130, 246, 0.25)"
+            >
+              <animate attributeName="r" values="5;12;5" dur="2s" repeatCount="indefinite" />
+              <animate attributeName="opacity" values="0.8;0.2;0.8" dur="2s" repeatCount="indefinite" />
+            </circle>
+            <circle
+              cx={points[points.length - 1].x}
+              cy={points[points.length - 1].y}
+              r="4.5"
+              fill="#3b82f6"
+              stroke="#ffffff"
+              strokeWidth="2"
+            />
+          </g>
+        )}
       </svg>
+
+      {/* Floating Hover Tooltip */}
+      {activePoint && (
+        <div
+          className="chart-floating-tooltip"
+          style={{
+            left: Math.min(Math.max(activePoint.x - 70, 10), w - 160),
+            top: Math.max(10, activePoint.y - 65)
+          }}
+        >
+          <div className="tooltip-title">⏱ {formatTime(activePoint.data.recorded_at)}</div>
+          <div className="tooltip-row">
+            <span>Power:</span>
+            <strong className="tooltip-power">{formatNum(activePoint.v, 1)} W</strong>
+          </div>
+          {activePoint.data.voltage != null && (
+            <div className="tooltip-sub">
+              {formatNum(activePoint.data.voltage, 1)}V · {formatNum(activePoint.data.current, 2)}A
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -125,8 +335,10 @@ function TelemetryDataState({ status = 'loading', height = 220, label = 'graph' 
 
 /* ===== SVG Z-Score Anomaly & Statistical Distribution Chart ===== */
 function ZScoreChart({ data = [], height = 320, initialThreshold = 3.0 }) {
+  const containerRef = useRef(null)
+  const width = useContainerWidth(containerRef, 800)
   const [threshold, setThreshold] = useState(initialThreshold)
-  const [hoveredPoint, setHoveredPoint] = useState(null)
+  const [hoverIndex, setHoverIndex] = useState(null)
 
   if (!data.length) {
     return (
@@ -156,6 +368,8 @@ function ZScoreChart({ data = [], height = 320, initialThreshold = 3.0 }) {
       recorded_at: d.recorded_at,
       device_id: d.device_id || 'esp-pzem-01',
       power: val,
+      voltage: d.voltage,
+      current: d.current,
       z: rawZ,
       absZ,
       isAnomaly,
@@ -167,20 +381,19 @@ function ZScoreChart({ data = [], height = 320, initialThreshold = 3.0 }) {
   const warningCount = pointsData.filter(p => p.isWarning).length
   const latestPoint = pointsData[pointsData.length - 1]
 
-  // Y-axis scaling around 0
-  const maxZ = Math.max(3.8, threshold * 1.2, ...pointsData.map(p => Math.abs(p.z) * 1.15))
+  const maxZ = Math.max(3.6, threshold * 1.15, ...pointsData.map(p => Math.abs(p.z) * 1.1))
   const yMin = -maxZ
   const yMax = maxZ
   const yRange = yMax - yMin || 1
 
-  const w = 1000
-  const h = 360
-  const padTop = 32
-  const padBot = 48
-  const padLeft = 65
-  const padRight = 30
-  const chartW = w - padLeft - padRight
-  const chartH = h - padTop - padBot
+  const w = width
+  const h = height
+  const padTop = 28
+  const padBot = 38
+  const padLeft = 60
+  const padRight = 24
+  const chartW = Math.max(10, w - padLeft - padRight)
+  const chartH = Math.max(10, h - padTop - padBot)
 
   const getY = (zVal) => padTop + chartH - ((zVal - yMin) / yRange) * chartH
   const getX = (idx) => padLeft + (idx / Math.max(pointsData.length - 1, 1)) * chartW
@@ -191,7 +404,7 @@ function ZScoreChart({ data = [], height = 320, initialThreshold = 3.0 }) {
     y: getY(p.z)
   }))
 
-  const linePath = svgPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
+  const smoothLine = getSmoothPath(svgPoints)
 
   const yZero = getY(0)
   const yUpperAnomaly = getY(threshold)
@@ -199,8 +412,36 @@ function ZScoreChart({ data = [], height = 320, initialThreshold = 3.0 }) {
   const yUpperWarning = getY(2.0)
   const yLowerWarning = getY(-2.0)
 
+  const activePoint = hoverIndex != null && svgPoints[hoverIndex] ? svgPoints[hoverIndex] : null
+
+  const handleMouseMove = (e) => {
+    if (!containerRef.current || svgPoints.length < 2) return
+    const rect = containerRef.current.getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    if (mouseX < padLeft - 10 || mouseX > w - padRight + 10) {
+      setHoverIndex(null)
+      return
+    }
+    const ratio = Math.max(0, Math.min(1, (mouseX - padLeft) / chartW))
+    const nearestIdx = Math.round(ratio * (svgPoints.length - 1))
+    setHoverIndex(nearestIdx)
+  }
+
+  const handleMouseLeave = () => setHoverIndex(null)
+
+  // Smart X-axis label spacing
+  const maxLabels = Math.min(6, Math.max(2, Math.floor(chartW / 110)))
+  const labelStep = Math.max(1, Math.floor((svgPoints.length - 1) / (maxLabels - 1)))
+  const labelIndices = []
+  for (let i = 0; i < svgPoints.length; i += labelStep) {
+    labelIndices.push(i)
+  }
+  if (labelIndices[labelIndices.length - 1] !== svgPoints.length - 1) {
+    labelIndices.push(svgPoints.length - 1)
+  }
+
   return (
-    <div className="zscore-chart-container">
+    <div className="zscore-chart-container" ref={containerRef}>
       {/* Control & Stat Badges Header */}
       <div className="zscore-toolbar">
         <div className="zscore-stats-strip">
@@ -238,44 +479,29 @@ function ZScoreChart({ data = [], height = 320, initialThreshold = 3.0 }) {
         </div>
       </div>
 
-      {/* Floating Hover Tooltip */}
-      {hoveredPoint && (
-        <div className="zscore-tooltip">
-          <div><strong>⏱ {formatTime(hoveredPoint.recorded_at)}</strong></div>
-          <div>Power: <strong>{hoveredPoint.power} W</strong></div>
-          <div>Z-Score: <strong style={{ color: hoveredPoint.isAnomaly ? '#ef4444' : hoveredPoint.isWarning ? '#f59e0b' : '#3b82f6' }}>
-            {hoveredPoint.z >= 0 ? `+${hoveredPoint.z.toFixed(2)}` : hoveredPoint.z.toFixed(2)}σ
-          </strong></div>
-          <div>Status: <span style={{ fontWeight: 700, color: hoveredPoint.isAnomaly ? '#ef4444' : hoveredPoint.isWarning ? '#d97706' : '#059669' }}>
-            {hoveredPoint.isAnomaly ? '🚨 Critical Anomaly' : hoveredPoint.isWarning ? '⚠️ Warning Deviation' : '✅ Normal'}
-          </span></div>
-        </div>
-      )}
-
-      {/* SVG Visualization */}
-      <div style={{ width: '100%', height, position: 'relative' }}>
-        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
+      {/* SVG Canvas */}
+      <div
+        style={{ width: '100%', height, position: 'relative', userSelect: 'none' }}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      >
+        <svg width={w} height={h} style={{ display: 'block', overflow: 'visible' }}>
           <defs>
-            <linearGradient id="zAreaGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.2" />
-              <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
-            </linearGradient>
-            <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="3" result="blur" />
-              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            <filter id="anomalyGlow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#ef4444" floodOpacity="0.8" />
             </filter>
           </defs>
 
-          {/* Anomaly Upper Band (Z > +threshold) */}
-          <rect x={padLeft} y={padTop} width={chartW} height={Math.max(0, yUpperAnomaly - padTop)} fill="rgba(239, 68, 68, 0.09)" />
-          {/* Anomaly Lower Band (Z < -threshold) */}
-          <rect x={padLeft} y={yLowerAnomaly} width={chartW} height={Math.max(0, (padTop + chartH) - yLowerAnomaly)} fill="rgba(239, 68, 68, 0.09)" />
+          {/* Anomaly Upper Band */}
+          <rect x={padLeft} y={padTop} width={chartW} height={Math.max(0, yUpperAnomaly - padTop)} fill="rgba(239, 68, 68, 0.08)" />
+          {/* Anomaly Lower Band */}
+          <rect x={padLeft} y={yLowerAnomaly} width={chartW} height={Math.max(0, (padTop + chartH) - yLowerAnomaly)} fill="rgba(239, 68, 68, 0.08)" />
 
           {/* Warning Bands */}
           {threshold > 2.0 && (
             <>
-              <rect x={padLeft} y={yUpperAnomaly} width={chartW} height={Math.max(0, yUpperWarning - yUpperAnomaly)} fill="rgba(245, 158, 11, 0.08)" />
-              <rect x={padLeft} y={yLowerWarning} width={chartW} height={Math.max(0, yLowerAnomaly - yLowerWarning)} fill="rgba(245, 158, 11, 0.08)" />
+              <rect x={padLeft} y={yUpperAnomaly} width={chartW} height={Math.max(0, yUpperWarning - yUpperAnomaly)} fill="rgba(245, 158, 11, 0.07)" />
+              <rect x={padLeft} y={yLowerWarning} width={chartW} height={Math.max(0, yLowerAnomaly - yLowerWarning)} fill="rgba(245, 158, 11, 0.07)" />
             </>
           )}
 
@@ -283,33 +509,25 @@ function ZScoreChart({ data = [], height = 320, initialThreshold = 3.0 }) {
           <rect x={padLeft} y={yUpperWarning} width={chartW} height={Math.max(0, yLowerWarning - yUpperWarning)} fill="rgba(59, 130, 246, 0.03)" />
 
           {/* Upper Anomaly Threshold Line */}
-          <line x1={padLeft} y1={yUpperAnomaly} x2={w - padRight} y2={yUpperAnomaly} stroke="#ef4444" strokeWidth="1.6" strokeDasharray="5 4" opacity="0.9" />
-          <text x={w - padRight - 6} y={yUpperAnomaly - 6} textAnchor="end" fill="#ef4444" fontSize="13" fontWeight="700" fontFamily="Inter, sans-serif">
-            +{threshold.toFixed(1)}σ Anomaly Threshold ({Math.round(meanVal + threshold * stddevVal)} W)
+          <line x1={padLeft} y1={yUpperAnomaly} x2={w - padRight} y2={yUpperAnomaly} stroke="#ef4444" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.85" />
+          <text x={w - padRight - 6} y={yUpperAnomaly - 5} textAnchor="end" fill="#ef4444" fontSize="10" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">
+            +{threshold.toFixed(1)}σ Anomaly ({Math.round(meanVal + threshold * stddevVal)} W)
           </text>
 
-          {/* Lower Anomaly Threshold Line (if in range) */}
+          {/* Lower Anomaly Threshold Line */}
           {yLowerAnomaly < padTop + chartH && (
             <>
-              <line x1={padLeft} y1={yLowerAnomaly} x2={w - padRight} y2={yLowerAnomaly} stroke="#ef4444" strokeWidth="1.6" strokeDasharray="5 4" opacity="0.9" />
-              <text x={w - padRight - 6} y={yLowerAnomaly + 14} textAnchor="end" fill="#ef4444" fontSize="13" fontWeight="700" fontFamily="Inter, sans-serif">
-                -{threshold.toFixed(1)}σ Anomaly Threshold ({Math.max(0, Math.round(meanVal - threshold * stddevVal))} W)
+              <line x1={padLeft} y1={yLowerAnomaly} x2={w - padRight} y2={yLowerAnomaly} stroke="#ef4444" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.85" />
+              <text x={w - padRight - 6} y={yLowerAnomaly + 12} textAnchor="end" fill="#ef4444" fontSize="10" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">
+                -{threshold.toFixed(1)}σ Anomaly ({Math.max(0, Math.round(meanVal - threshold * stddevVal))} W)
               </text>
             </>
           )}
 
-          {/* Warning Level Lines (±2σ) */}
-          {threshold > 2.0 && (
-            <>
-              <line x1={padLeft} y1={yUpperWarning} x2={w - padRight} y2={yUpperWarning} stroke="#f59e0b" strokeWidth="1.2" strokeDasharray="3 3" opacity="0.75" />
-              <line x1={padLeft} y1={yLowerWarning} x2={w - padRight} y2={yLowerWarning} stroke="#f59e0b" strokeWidth="1.2" strokeDasharray="3 3" opacity="0.75" />
-            </>
-          )}
-
           {/* Mean Baseline Line (Z = 0) */}
-          <line x1={padLeft} y1={yZero} x2={w - padRight} y2={yZero} stroke="#475569" strokeWidth="1.8" strokeDasharray="4 4" />
-          <text x={padLeft + 10} y={yZero - 6} fill="#475569" fontSize="13" fontWeight="700" fontFamily="Inter, sans-serif">
-            μ Baseline (Z = 0σ | {Math.round(meanVal)} W)
+          <line x1={padLeft} y1={yZero} x2={w - padRight} y2={yZero} stroke="#64748b" strokeWidth="1.4" strokeDasharray="3 3" />
+          <text x={padLeft + 8} y={yZero - 5} fill="#64748b" fontSize="10" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">
+            μ Baseline (0σ · {Math.round(meanVal)} W)
           </text>
 
           {/* Y-Axis tick labels */}
@@ -318,64 +536,99 @@ function ZScoreChart({ data = [], height = 320, initialThreshold = 3.0 }) {
             const yPos = getY(tickZ)
             return (
               <g key={tickZ}>
-                <line x1={padLeft - 5} y1={yPos} x2={padLeft} y2={yPos} stroke="#cbd5e1" strokeWidth="1" />
-                <text x={padLeft - 10} y={yPos + 4} textAnchor="end" fill="#64748b" fontSize="13" fontWeight="600" fontFamily="Inter, sans-serif">
+                <line x1={padLeft - 4} y1={yPos} x2={padLeft} y2={yPos} stroke="#cbd5e1" strokeWidth="1" />
+                <text x={padLeft - 8} y={yPos + 4} textAnchor="end" fill="#94a3b8" fontSize="10" fontWeight="600" fontFamily="Inter, system-ui, sans-serif">
                   {tickZ > 0 ? `+${tickZ}σ` : tickZ === 0 ? '0σ' : `${tickZ}σ`}
                 </text>
               </g>
             )
           })}
 
-          {/* Z-Score Trend Line */}
-          <path d={linePath} fill="none" stroke="#2563eb" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
+          {/* Smooth Z-Score Trend Line */}
+          {smoothLine && (
+            <path d={smoothLine} fill="none" stroke="#2563eb" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+          )}
 
           {/* Data Points */}
           {svgPoints.map((p, i) => {
-            const isHovered = hoveredPoint && hoveredPoint.index === p.index
+            const isHovered = activePoint && activePoint.index === p.index
             let fillCol = '#3b82f6'
-            let radius = isHovered ? 7.5 : 4.5
+            let radius = isHovered ? 6.5 : (p.isAnomaly ? 6 : p.isWarning ? 4.5 : 3.5)
 
-            if (p.isAnomaly) {
-              fillCol = '#ef4444'
-              radius = isHovered ? 9.5 : 7
-            } else if (p.isWarning) {
-              fillCol = '#f59e0b'
-              radius = isHovered ? 8.5 : 5.5
-            }
+            if (p.isAnomaly) fillCol = '#ef4444'
+            else if (p.isWarning) fillCol = '#f59e0b'
 
             return (
-              <g key={i} onMouseEnter={() => setHoveredPoint(p)} onMouseLeave={() => setHoveredPoint(null)} style={{ cursor: 'pointer' }}>
-                {/* Outer pulse ring for anomalies */}
+              <g key={i}>
                 {p.isAnomaly && (
-                  <circle cx={p.x} cy={p.y} r="14" fill="none" stroke="#ef4444" strokeWidth="2" opacity="0.6" filter="url(#glow)">
-                    <animate attributeName="r" values="8;18;8" dur="1.8s" repeatCount="indefinite" />
-                    <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.8s" repeatCount="indefinite" />
+                  <circle cx={p.x} cy={p.y} r="10" fill="none" stroke="#ef4444" strokeWidth="1.8" filter="url(#anomalyGlow)">
+                    <animate attributeName="r" values="6;14;6" dur="1.8s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="0.9;0.2;0.9" dur="1.8s" repeatCount="indefinite" />
                   </circle>
                 )}
-                {/* Node point */}
                 <circle
                   cx={p.x}
                   cy={p.y}
                   r={radius}
                   fill={fillCol}
                   stroke="#ffffff"
-                  strokeWidth={isHovered ? 3 : 2}
-                  style={{ transition: 'r 0.15s ease' }}
+                  strokeWidth={isHovered ? 2.5 : 1.5}
                 />
               </g>
             )
           })}
 
           {/* X labels */}
-          {pointsData.filter((_, i) => i % Math.max(Math.floor(pointsData.length / 6), 1) === 0).map((p, i) => {
-            const xPos = getX(p.index)
+          {labelIndices.map((idx) => {
+            const p = svgPoints[idx]
+            if (!p) return null
             return (
-              <text key={i} x={xPos} y={h - 10} textAnchor="middle" fill="#94a3b8" fontSize="13" fontFamily="Inter, sans-serif">
+              <text key={idx} x={p.x} y={h - 12} textAnchor="middle" fill="#94a3b8" fontSize="11" fontFamily="Inter, system-ui, sans-serif">
                 {formatTime(p.recorded_at)}
               </text>
             )
           })}
+
+          {/* Active hover crosshair */}
+          {activePoint && (
+            <line
+              x1={activePoint.x}
+              y1={padTop}
+              x2={activePoint.x}
+              y2={padTop + chartH}
+              stroke="#64748b"
+              strokeWidth="1.2"
+              strokeDasharray="3 3"
+              opacity="0.8"
+            />
+          )}
         </svg>
+
+        {/* Hover Tooltip */}
+        {activePoint && (
+          <div
+            className="chart-floating-tooltip"
+            style={{
+              left: Math.min(Math.max(activePoint.x - 80, 10), w - 180),
+              top: Math.max(10, activePoint.y - 75)
+            }}
+          >
+            <div className="tooltip-title">⏱ {formatTime(activePoint.recorded_at)}</div>
+            <div className="tooltip-row">
+              <span>Power:</span>
+              <strong>{activePoint.power} W</strong>
+            </div>
+            <div className="tooltip-row">
+              <span>Z-Score:</span>
+              <strong style={{ color: activePoint.isAnomaly ? '#ef4444' : activePoint.isWarning ? '#f59e0b' : '#3b82f6' }}>
+                {activePoint.z >= 0 ? `+${activePoint.z.toFixed(2)}` : activePoint.z.toFixed(2)}σ
+              </strong>
+            </div>
+            <div className="tooltip-sub" style={{ fontWeight: 700, color: activePoint.isAnomaly ? '#ef4444' : activePoint.isWarning ? '#d97706' : '#059669' }}>
+              {activePoint.isAnomaly ? '🚨 Critical Anomaly' : activePoint.isWarning ? '⚠️ Warning Deviation' : '✅ Normal Range'}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Legend */}
@@ -393,7 +646,7 @@ function ZScoreChart({ data = [], height = 320, initialThreshold = 3.0 }) {
           <span>Critical Anomaly (&gt; {threshold.toFixed(1)}σ Outlier)</span>
         </div>
         <div style={{ marginLeft: 'auto', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-          Standardized Z-Score: <code>Z = (P - μ) / σ</code>
+          Standardized Gaussian: <code>Z = (P - μ) / σ</code>
         </div>
       </div>
     </div>
@@ -437,6 +690,8 @@ const USAGE_RANGE_CONFIG = {
 
 /* ===== SVG Electricity Usage Report Chart (Present Day / 7 / 15 / 30 Days) ===== */
 function UsageReportChart({ height = 320 }) {
+  const containerRef = useRef(null)
+  const width = useContainerWidth(containerRef, 800)
   const [range, setRange] = useState('today')
   const [rawData, setRawData] = useState([])
   const [dataStatus, setDataStatus] = useState('loading')
@@ -448,8 +703,6 @@ function UsageReportChart({ height = 320 }) {
 
   const loadRange = useCallback(() => {
     setLoading(true)
-    // Ask the API for the exact reporting window. This prevents high-frequency
-    // telemetry from being truncated in the 15/30-day reports.
     const end = new Date()
     const start = new Date(end)
     start.setDate(start.getDate() - (cfg.days - 1))
@@ -471,11 +724,10 @@ function UsageReportChart({ height = 320 }) {
         setDataStatus('unavailable')
       })
       .finally(() => setLoading(false))
-  }, [range])
+  }, [cfg.days])
 
   useEffect(() => {
     loadRange()
-    // Real-time tracking: re-pull and re-aggregate on an interval
     const timer = setInterval(loadRange, 30000)
     return () => clearInterval(timer)
   }, [loadRange])
@@ -524,21 +776,25 @@ function UsageReportChart({ height = 320 }) {
   const avgKwh = bars.length ? totalKwh / bars.length : 0
   const peakBar = bars.reduce((max, b) => (!max || b.kwh > max.kwh ? b : max), null)
 
-  const w = 1000
-  const h = 380
-  const padTop = 30
-  const padBot = 56
-  const padLeft = 65
-  const padRight = 20
-  const chartW = w - padLeft - padRight
-  const chartH = h - padTop - padBot
-  const maxKwh = Math.max(...bars.map(b => b.kwh), 0.5) * 1.2
-  const barGap = 6
-  const barW = bars.length ? chartW / bars.length - barGap : 0
-  const labelStride = Math.max(Math.ceil(bars.length / (cfg.buckets === 'hour' ? 12 : 10)), 1)
+  const w = width
+  const h = height
+  const padTop = 26
+  const padBot = 42
+  const padLeft = 60
+  const padRight = 24
+  const chartW = Math.max(10, w - padLeft - padRight)
+  const chartH = Math.max(10, h - padTop - padBot)
+  const maxKwh = Math.max(...bars.map(b => b.kwh), 0.1) * 1.25
+
+  const totalSlots = bars.length || 1
+  const slotWidth = chartW / totalSlots
+  const barGap = Math.max(2, Math.min(8, slotWidth * 0.25))
+  const barW = Math.max(2, slotWidth - barGap)
+
+  const labelStride = Math.max(1, Math.ceil(bars.length / Math.min(12, Math.floor(chartW / 65))))
 
   return (
-    <div className="panel-card">
+    <div className="panel-card" ref={containerRef}>
       <div className="panel-header">
         <div className="panel-title-area">
           <span className="panel-icon">📈</span>
@@ -572,78 +828,103 @@ function UsageReportChart({ height = 320 }) {
         </div>
         <div style={{ padding: 16, background: 'var(--amber-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--amber-border)' }}>
           <div style={{ fontSize: '0.75rem', color: 'var(--amber-main)', fontWeight: 700 }}>PEAK {cfg.buckets === 'hour' ? 'HOUR' : 'DAY'}</div>
-          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--amber-main)' }}>{peakBar ? `${peakBar.label} · ${formatNum(peakBar.kwh, 2)} kWh` : '—'}</div>
+          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--amber-main)' }}>{peakBar && peakBar.kwh > 0 ? `${peakBar.label} · ${formatNum(peakBar.kwh, 2)} kWh` : '—'}</div>
         </div>
       </div>
-
-      {hoveredBar && (
-        <div className="zscore-tooltip">
-          <div><strong>{hoveredBar.label}</strong></div>
-          <div>Usage: <strong>{formatNum(hoveredBar.kwh, 3)} kWh</strong></div>
-          <div>Samples: <strong>{hoveredBar.count}</strong></div>
-        </div>
-      )}
 
       <div style={{ width: '100%', height, position: 'relative' }}>
         {dataStatus !== 'ready' || !bars.some(b => b.count > 0) ? (
           <TelemetryDataState status={dataStatus === 'ready' ? 'empty' : dataStatus} height={height} label="usage report graph" />
         ) : (
-          <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
+          <svg width={w} height={h} style={{ display: 'block', overflow: 'visible' }}>
             <defs>
               <linearGradient id="usageBarGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#6366f1" />
+                <stop offset="0%" stopColor="#4f46e5" />
                 <stop offset="100%" stopColor="#3b82f6" />
               </linearGradient>
               <linearGradient id="usageBarGradCurrent" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#10b981" />
                 <stop offset="100%" stopColor="#059669" />
               </linearGradient>
+              <linearGradient id="usageBarGradPeak" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#f59e0b" />
+                <stop offset="100%" stopColor="#d97706" />
+              </linearGradient>
             </defs>
 
+            {/* Grid lines */}
             {Array.from({ length: 5 }, (_, i) => (maxKwh * i) / 4).map((gv, i) => {
               const y = padTop + chartH - (gv / maxKwh) * chartH
               return (
                 <g key={i}>
-                  <line x1={padLeft} y1={y} x2={w - padRight} y2={y} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="4 4" />
-                  <text x={padLeft - 10} y={y + 5} textAnchor="end" fill="#94a3b8" fontSize="18" fontFamily="Inter, sans-serif" fontWeight="500">
-                    {gv.toFixed(1)}
+                  <line x1={padLeft} y1={y} x2={w - padRight} y2={y} stroke="#e2e8f0" strokeWidth="1" strokeDasharray={i === 0 ? 'none' : '3 4'} />
+                  <text x={padLeft - 10} y={y + 4} textAnchor="end" fill="#94a3b8" fontSize="10" fontFamily="Inter, system-ui, sans-serif" fontWeight="600">
+                    {gv.toFixed(2)}
                   </text>
                 </g>
               )
             })}
 
+            {/* Bars */}
             {bars.map((b, i) => {
-              const x = padLeft + i * (barW + barGap)
+              const x = padLeft + i * slotWidth + barGap / 2
               const barH = maxKwh > 0 ? (b.kwh / maxKwh) * chartH : 0
               const y = padTop + chartH - barH
               const isHovered = hoveredBar === b
+              const isPeak = peakBar && peakBar.kwh > 0 && b === peakBar
+              const fillGrad = b.isCurrent ? 'url(#usageBarGradCurrent)' : isPeak ? 'url(#usageBarGradPeak)' : 'url(#usageBarGrad)'
+
               return (
-                <g key={i} onMouseEnter={() => setHoveredBar(b)} onMouseLeave={() => setHoveredBar(null)} style={{ cursor: 'pointer' }}>
+                <g
+                  key={i}
+                  onMouseEnter={() => setHoveredBar(b)}
+                  onMouseLeave={() => setHoveredBar(null)}
+                  style={{ cursor: 'pointer' }}
+                >
                   <rect
                     x={x}
                     y={y}
-                    width={Math.max(barW, 1)}
-                    height={Math.max(barH, 1)}
+                    width={Math.max(barW, 2)}
+                    height={Math.max(barH, 2)}
                     rx="4"
-                    fill={b.isCurrent ? 'url(#usageBarGradCurrent)' : 'url(#usageBarGrad)'}
-                    opacity={isHovered ? 1 : 0.92}
+                    fill={fillGrad}
+                    opacity={isHovered ? 1 : 0.9}
                     stroke={isHovered ? '#1e293b' : 'none'}
                     strokeWidth={isHovered ? 1.5 : 0}
+                    style={{ transition: 'opacity 0.15s ease' }}
                   />
+                  {isPeak && (
+                    <text x={x + barW / 2} y={y - 6} textAnchor="middle" fill="#d97706" fontSize="10" fontWeight="800">
+                      ★
+                    </text>
+                  )}
                 </g>
               )
             })}
 
-            {bars.filter((_, i) => i % labelStride === 0).map((b, i) => {
+            {/* X-axis labels */}
+            {bars.filter((_, i) => i % labelStride === 0).map((b) => {
               const origIdx = bars.indexOf(b)
-              const x = padLeft + origIdx * (barW + barGap) + barW / 2
+              const x = padLeft + origIdx * slotWidth + slotWidth / 2
               return (
-                <text key={i} x={x} y={h - padBot + 24} textAnchor="middle" fill="#94a3b8" fontSize="16" fontFamily="Inter, sans-serif">
+                <text key={origIdx} x={x} y={h - 12} textAnchor="middle" fill="#94a3b8" fontSize="10" fontFamily="Inter, system-ui, sans-serif" fontWeight="500">
                   {b.label}
                 </text>
               )
             })}
           </svg>
+        )}
+
+        {/* Hover Tooltip */}
+        {hoveredBar && (
+          <div className="chart-floating-tooltip" style={{ right: 20, top: 10 }}>
+            <div className="tooltip-title">📅 {hoveredBar.label}</div>
+            <div className="tooltip-row">
+              <span>Energy:</span>
+              <strong className="tooltip-power">{formatNum(hoveredBar.kwh, 3)} kWh</strong>
+            </div>
+            <div className="tooltip-sub">Samples: {hoveredBar.count}</div>
+          </div>
         )}
       </div>
 
@@ -656,8 +937,9 @@ function UsageReportChart({ height = 320 }) {
 
 const DEVICE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899', '#84cc16']
 
-/* ===== SVG Donut/Pie Chart (generic, reusable) ===== */
-function PieChart({ data = [], size = 220, thickness = 34, centerLabel = '', centerSublabel = '' }) {
+/* ===== SVG Donut/Pie Chart (generic, reusable, polished) ===== */
+function PieChart({ data = [], size = 220, thickness = 32, centerLabel = '', centerSublabel = '' }) {
+  const [hoverIdx, setHoverIdx] = useState(null)
   const total = data.reduce((a, d) => a + d.value, 0)
   const r = (size - thickness) / 2
   const cx = size / 2
@@ -674,45 +956,71 @@ function PieChart({ data = [], size = 220, thickness = 34, centerLabel = '', cen
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0, overflow: 'visible' }}>
         <g transform={`rotate(-90 ${cx} ${cy})`}>
           {data.map((d, i) => {
             const frac = d.value / total
             const dash = frac * circumference
             const gap = circumference - dash
-            const segment = (
+            const isHovered = hoverIdx === i
+            const strokeW = isHovered ? thickness + 4 : thickness
+            const offset = -cumulative
+            cumulative += dash
+
+            return (
               <circle
                 key={i}
-                cx={cx} cy={cy} r={r}
+                cx={cx}
+                cy={cy}
+                r={r}
                 fill="none"
                 stroke={d.color}
-                strokeWidth={thickness}
-                strokeDasharray={`${dash} ${gap}`}
-                strokeDashoffset={-cumulative}
+                strokeWidth={strokeW}
+                strokeDasharray={`${Math.max(0, dash - (data.length > 1 ? 3 : 0))} ${gap + (data.length > 1 ? 3 : 0)}`}
+                strokeDashoffset={offset}
+                strokeLinecap={data.length === 1 ? 'butt' : 'round'}
+                style={{
+                  cursor: 'pointer',
+                  transition: 'stroke-width 0.2s ease, opacity 0.2s ease',
+                  opacity: hoverIdx == null || isHovered ? 1 : 0.6
+                }}
+                onMouseEnter={() => setHoverIdx(i)}
+                onMouseLeave={() => setHoverIdx(null)}
               />
             )
-            cumulative += dash
-            return segment
           })}
         </g>
         {centerLabel && (
-          <text x={cx} y={cy - 4} textAnchor="middle" fontSize="22" fontWeight="800" fill="var(--text-title)" fontFamily="Inter, sans-serif">
-            {centerLabel}
+          <text x={cx} y={cy - 2} textAnchor="middle" fontSize="20" fontWeight="800" fill="var(--text-title)" fontFamily="Inter, system-ui, sans-serif">
+            {hoverIdx != null ? formatNum(data[hoverIdx].value, 1) : centerLabel}
           </text>
         )}
         {centerSublabel && (
-          <text x={cx} y={cy + 18} textAnchor="middle" fontSize="12" fontWeight="600" fill="#94a3b8" fontFamily="Inter, sans-serif">
-            {centerSublabel}
+          <text x={cx} y={cy + 18} textAnchor="middle" fontSize="11" fontWeight="600" fill="#94a3b8" fontFamily="Inter, system-ui, sans-serif">
+            {hoverIdx != null ? data[hoverIdx].label : centerSublabel}
           </text>
         )}
       </svg>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 160 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 150 }}>
         {data.map((d, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: d.color, display: 'inline-block', flexShrink: 0 }} />
+          <div
+            key={i}
+            onMouseEnter={() => setHoverIdx(i)}
+            onMouseLeave={() => setHoverIdx(null)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: '0.82rem',
+              cursor: 'pointer',
+              opacity: hoverIdx == null || hoverIdx === i ? 1 : 0.5,
+              transition: 'opacity 0.15s ease'
+            }}
+          >
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: d.color, display: 'inline-block', flexShrink: 0, boxShadow: hoverIdx === i ? `0 0 8px ${d.color}` : 'none' }} />
             <span style={{ color: 'var(--text-title)', fontWeight: 600 }}>{d.label}</span>
-            <span style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>{formatNum((d.value / total) * 100, 1)}%</span>
+            <span style={{ color: 'var(--text-muted)', marginLeft: 'auto', fontWeight: 700 }}>{formatNum((d.value / total) * 100, 1)}%</span>
           </div>
         ))}
       </div>

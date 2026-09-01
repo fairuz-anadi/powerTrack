@@ -8,6 +8,10 @@ node_modules/
 **/ .env
 **/.env
 
+# Build outputs
+dist/
+build/
+
 # Editor
 .vscode/
 .DS_Store

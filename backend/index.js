@@ -68,6 +68,20 @@ function parseLogLines(limit) {
   return parseJsonLog(DATA_FILES.readings, limit);
 }
 
+app.get('/', (req, res) => {
+  res.json({
+    status: 'online',
+    message: 'PowerTrack Backend API is running on port 3000.',
+    frontend_url: 'http://localhost:5174',
+    endpoints: [
+      '/api/readings/health',
+      '/api/readings',
+      '/api/readings/latest',
+      '/api/devices/relay'
+    ]
+  });
+});
+
 app.post('/api/readings', async (req, res) => {
   try {
     const { device_id, voltage, current, power_watts } = req.body || {};
